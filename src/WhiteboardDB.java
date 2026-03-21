@@ -1,0 +1,207 @@
+import java.awt.Color;
+import java.awt.Point;
+import java.io.*;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
+
+public class WhiteboardDB {
+
+    private static final String URL;
+
+    static {
+        Properties props = new Properties();
+        try (BufferedReader reader = new BufferedReader(new FileReader(".env"))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                int eq = line.indexOf('=');
+                if (eq < 0) continue;
+                props.setProperty(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Could not read .env file: " + e.getMessage(), e);
+        }
+        URL = props.getProperty("DATABASE_URL");
+        if (URL == null || URL.isBlank())
+            throw new RuntimeException("DATABASE_URL not set in .env");
+    }
+
+    static class SavedBoard {
+        final int id;
+        final String name;
+        final String savedAt;
+        SavedBoard(int id, String name, String savedAt) {
+            this.id = id;
+            this.name = name;
+            this.savedAt = savedAt;
+        }
+        @Override
+        public String toString() {
+            return name + "  (" + savedAt + ")";
+        }
+    }
+
+    static Connection connect() throws SQLException {
+        return DriverManager.getConnection(URL);
+    }
+
+    static void initSchema() {
+        String sql = """
+            CREATE TABLE IF NOT EXISTS whiteboards (
+                id       SERIAL PRIMARY KEY,
+                name     VARCHAR(255) NOT NULL,
+                saved_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS strokes (
+                id           SERIAL PRIMARY KEY,
+                whiteboard_id INT  NOT NULL REFERENCES whiteboards(id) ON DELETE CASCADE,
+                color_r      INT  NOT NULL,
+                color_g      INT  NOT NULL,
+                color_b      INT  NOT NULL,
+                stroke_width FLOAT NOT NULL,
+                stroke_order INT  NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS stroke_points (
+                id          SERIAL PRIMARY KEY,
+                stroke_id   INT NOT NULL REFERENCES strokes(id) ON DELETE CASCADE,
+                x           INT NOT NULL,
+                y           INT NOT NULL,
+                point_order INT NOT NULL
+            );
+            """;
+
+        try (Connection conn = connect(); Statement stmt = conn.createStatement()) {
+            conn.setAutoCommit(false);
+            for (String s : sql.split(";")) {
+                s = s.strip();
+                if (!s.isEmpty()) stmt.execute(s);
+            }
+            conn.commit();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to initialise schema: " + e.getMessage(), e);
+        }
+    }
+
+    static int save(String name, ArrayList<CanvasPanel.Stroke> strokes) throws SQLException {
+        String insertBoard  = "INSERT INTO whiteboards (name) VALUES (?) RETURNING id";
+        String insertStroke = "INSERT INTO strokes (whiteboard_id, color_r, color_g, color_b, stroke_width, stroke_order) VALUES (?,?,?,?,?,?) RETURNING id";
+        String insertPoint  = "INSERT INTO stroke_points (stroke_id, x, y, point_order) VALUES (?,?,?,?)";
+
+        try (Connection conn = connect()) {
+            conn.setAutoCommit(false);
+
+            int boardId;
+            try (PreparedStatement ps = conn.prepareStatement(insertBoard)) {
+                ps.setString(1, name);
+                ResultSet rs = ps.executeQuery();
+                rs.next();
+                boardId = rs.getInt(1);
+            }
+
+            for (int si = 0; si < strokes.size(); si++) {
+                CanvasPanel.Stroke stroke = strokes.get(si);
+                int strokeId;
+                try (PreparedStatement ps = conn.prepareStatement(insertStroke)) {
+                    ps.setInt(1, boardId);
+                    ps.setInt(2, stroke.color.getRed());
+                    ps.setInt(3, stroke.color.getGreen());
+                    ps.setInt(4, stroke.color.getBlue());
+                    ps.setFloat(5, stroke.width);
+                    ps.setInt(6, si);
+                    ResultSet rs = ps.executeQuery();
+                    rs.next();
+                    strokeId = rs.getInt(1);
+                }
+
+                try (PreparedStatement ps = conn.prepareStatement(insertPoint)) {
+                    for (int pi = 0; pi < stroke.points.size(); pi++) {
+                        Point p = stroke.points.get(pi);
+                        ps.setInt(1, strokeId);
+                        ps.setInt(2, p.x);
+                        ps.setInt(3, p.y);
+                        ps.setInt(4, pi);
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+            }
+
+            conn.commit();
+            return boardId;
+        }
+    }
+
+    static ArrayList<CanvasPanel.Stroke> load(int boardId) throws SQLException {
+        String queryStrokes = """
+            SELECT id, color_r, color_g, color_b, stroke_width
+            FROM strokes
+            WHERE whiteboard_id = ?
+            ORDER BY stroke_order
+            """;
+        String queryPoints = """
+            SELECT x, y
+            FROM stroke_points
+            WHERE stroke_id = ?
+            ORDER BY point_order
+            """;
+
+        ArrayList<CanvasPanel.Stroke> result = new ArrayList<>();
+
+        try (Connection conn = connect();
+             PreparedStatement strokeStmt = conn.prepareStatement(queryStrokes)) {
+
+            strokeStmt.setInt(1, boardId);
+            ResultSet strokeRs = strokeStmt.executeQuery();
+
+            try (PreparedStatement pointStmt = conn.prepareStatement(queryPoints)) {
+                while (strokeRs.next()) {
+                    Color color = new Color(
+                        strokeRs.getInt("color_r"),
+                        strokeRs.getInt("color_g"),
+                        strokeRs.getInt("color_b")
+                    );
+                    float width = strokeRs.getFloat("stroke_width");
+                    CanvasPanel.Stroke stroke = new CanvasPanel.Stroke(color, width);
+
+                    pointStmt.setInt(1, strokeRs.getInt("id"));
+                    ResultSet pointRs = pointStmt.executeQuery();
+                    while (pointRs.next()) {
+                        stroke.points.add(new Point(pointRs.getInt("x"), pointRs.getInt("y")));
+                    }
+                    result.add(stroke);
+                }
+            }
+        }
+        return result;
+    }
+
+    static boolean delete(int boardId) throws SQLException {
+        String sql = "DELETE FROM whiteboards WHERE id = ?";
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, boardId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    static List<SavedBoard> listSaved() throws SQLException {
+        String sql = "SELECT id, name, saved_at FROM whiteboards ORDER BY saved_at DESC";
+        List<SavedBoard> boards = new ArrayList<>();
+        try (Connection conn = connect();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                boards.add(new SavedBoard(
+                    rs.getInt("id"),
+                    rs.getString("name"),
+                    rs.getTimestamp("saved_at").toLocalDateTime()
+                        .toString().replace("T", "  ").substring(0, 19)
+                ));
+            }
+        }
+        return boards;
+    }
+}

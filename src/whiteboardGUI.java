@@ -4,6 +4,7 @@ Whiteboard GUI Application
 3/10/25
 *******************/
 import java.awt.*;
+import java.util.List;
 import javax.swing.*;
 import javax.swing.border.*;
 

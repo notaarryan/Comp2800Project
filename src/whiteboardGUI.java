@@ -3,11 +3,9 @@ Marko Simic
 Whiteboard GUI Application
 3/10/25
 *******************/
+import java.awt.*;
 import javax.swing.*;
 import javax.swing.border.*;
-import java.awt.*;
-import java.awt.event.*;
-import java.util.List;
 
 public class whiteboardGUI {
 
@@ -50,6 +48,30 @@ public class whiteboardGUI {
         eraserBtn.addActionListener(e -> canvas.setEraserMode(eraserBtn.isSelected()));
         toolbar.add(eraserBtn);
 
+        // --- Color picker button ---
+        JButton colorBtn = createToolButton("Color");
+
+        // preview box (must be before listener so it's accessible)
+        JPanel colorPreview = new JPanel();
+        colorPreview.setPreferredSize(new Dimension(20, 20));
+        colorPreview.setBackground(Color.BLACK);
+
+        colorBtn.addActionListener(e -> {
+            Color selectedColor = JColorChooser.showDialog(
+                null,
+                "Choose Brush Color",
+                Color.BLACK
+            );
+
+            if (selectedColor != null) {
+                canvas.setCurrentColor(selectedColor);
+                colorPreview.setBackground(selectedColor);
+            }
+        });
+
+        toolbar.add(colorBtn);
+        toolbar.add(colorPreview);
+
         // --- Brush size slider ---
         toolbar.add(Box.createHorizontalStrut(10));
 
@@ -61,11 +83,38 @@ public class whiteboardGUI {
         brushSlider.setPreferredSize(new Dimension(120, 40));
         brushSlider.setBackground(new Color(45,45,58));
 
+        // --- Brush size preview ---
+        var brushPreview = new JPanel() {
+            private int size = 6;
+
+            public void setSizeValue(int s) {
+                size = s;
+                repaint();
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.setColor(Color.BLACK);
+
+                int x = (getWidth() - size) / 2;
+                int y = (getHeight() - size) / 2;
+
+                g.fillOval(x, y, size, size);
+            }
+        };
+
+        brushPreview.setPreferredSize(new Dimension(40, 40));
+        brushPreview.setBackground(new Color(45,45,58));
+
         brushSlider.addChangeListener(e -> {
-            canvas.setBrushSize(brushSlider.getValue());
+            int size = brushSlider.getValue();
+            canvas.setBrushSize(size);
+            brushPreview.setSizeValue(size);
         });
 
         toolbar.add(brushSlider);
+        toolbar.add(brushPreview);
 
         // --- Clear button ---
         JButton clearBtn = createToolButton("Clear");

@@ -106,6 +106,10 @@ public class ClientHandler implements Runnable {
         System.out.printf("[Server] %s joined room %s (%d users)%n", username, roomId, room.getClientCount());
         sendMessage("ROOM_JOINED " + roomId + " " + room.getClientCount());
         room.broadcast("USER_JOINED " + username, this);
+
+        // Ask one existing client to send their canvas state to everyone (including the new joiner)
+        ClientHandler syncSource = room.getFirstClient(this);
+        if (syncSource != null) syncSource.sendMessage("REQUEST_SYNC");
     }
 
     private void handleLeave() {

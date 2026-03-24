@@ -20,6 +20,7 @@ public class WhiteboardClient {
         void onError(String message);
         void onEndSync(ArrayList<CanvasPanel.Stroke> strokes, ArrayList<CanvasPanel.ShapeItem> shapes);
         void onCursor(String username, int x, int y);
+        void onSyncRequested();
     }
 
     private Socket socket;
@@ -132,6 +133,7 @@ public class WhiteboardClient {
                     listener.onCursor(parts[1],
                         Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
             }
+            case "REQUEST_SYNC" -> listener.onSyncRequested();
         }
     }
 

@@ -163,6 +163,12 @@ public class whiteboardGUI {
             }
 
             @Override
+            public void onSyncRequested() {
+                if (client != null)
+                    client.sendFullSync(canvas.getStrokes(), canvas.getShapes());
+            }
+
+            @Override
             public void onError(String message) {
                 SwingUtilities.invokeLater(() -> {
                     if (!inRoom) { // never joined a room — clean up so user can retry
@@ -329,12 +335,13 @@ public class whiteboardGUI {
                 return;
             }
 
-            // Prompt for server IP and username
-            // Pre-fill with the LAN IP so the host connects to their own server correctly
-            JPanel inputPanel = new JPanel(new GridLayout(2, 2, 6, 6));
+            // Prompt for server IP, port, and username
+            JPanel inputPanel = new JPanel(new GridLayout(3, 2, 6, 6));
             JTextField ipField   = new JTextField(getLocalIP());
+            JTextField portField = new JTextField(String.valueOf(WhiteboardServer.DEFAULT_PORT));
             JTextField nameField = new JTextField();
             inputPanel.add(new JLabel("Server IP:"));   inputPanel.add(ipField);
+            inputPanel.add(new JLabel("Port:"));        inputPanel.add(portField);
             inputPanel.add(new JLabel("Your Name:"));   inputPanel.add(nameField);
 
             int res = JOptionPane.showConfirmDialog(frame, inputPanel,
@@ -343,6 +350,9 @@ public class whiteboardGUI {
 
             String ip       = ipField.getText().trim();
             String username = nameField.getText().trim();
+            int port;
+            try { port = Integer.parseInt(portField.getText().trim()); }
+            catch (NumberFormatException ex) { port = WhiteboardServer.DEFAULT_PORT; }
             if (ip.isEmpty() || username.isEmpty()) {
                 JOptionPane.showMessageDialog(frame, "Please fill in all fields.",
                     "Error", JOptionPane.ERROR_MESSAGE);
@@ -352,9 +362,9 @@ public class whiteboardGUI {
             // Connect then request room creation
             serverIp = ip;
             client   = new WhiteboardClient(networkListener);
-            if (!client.connect(ip, WhiteboardServer.DEFAULT_PORT)) {
+            if (!client.connect(ip, port)) {
                 JOptionPane.showMessageDialog(frame,
-                    "Could not connect to server at " + ip + ":" + WhiteboardServer.DEFAULT_PORT
+                    "Could not connect to server at " + ip + ":" + port
                     + "\n\nMake sure WhiteboardServer is running on that machine.",
                     "Connection Failed", JOptionPane.ERROR_MESSAGE);
                 client = null;
@@ -377,12 +387,14 @@ public class whiteboardGUI {
             }
 
             // Prompt for all join credentials
-            JPanel inputPanel = new JPanel(new GridLayout(4, 2, 6, 6));
+            JPanel inputPanel = new JPanel(new GridLayout(5, 2, 6, 6));
             JTextField ipField       = new JTextField(getLocalIP());
+            JTextField portField     = new JTextField(String.valueOf(WhiteboardServer.DEFAULT_PORT));
             JTextField roomIdField   = new JTextField();
             JTextField roomCodeField = new JTextField();
             JTextField nameField     = new JTextField();
             inputPanel.add(new JLabel("Server IP:"));   inputPanel.add(ipField);
+            inputPanel.add(new JLabel("Port:"));        inputPanel.add(portField);
             inputPanel.add(new JLabel("Room ID:"));     inputPanel.add(roomIdField);
             inputPanel.add(new JLabel("Room Code:"));   inputPanel.add(roomCodeField);
             inputPanel.add(new JLabel("Your Name:"));   inputPanel.add(nameField);
@@ -395,6 +407,9 @@ public class whiteboardGUI {
             String roomId   = roomIdField.getText().trim().toUpperCase();
             String roomCode = roomCodeField.getText().trim();
             String username = nameField.getText().trim();
+            int port;
+            try { port = Integer.parseInt(portField.getText().trim()); }
+            catch (NumberFormatException ex) { port = WhiteboardServer.DEFAULT_PORT; }
 
             if (ip.isEmpty() || roomId.isEmpty() || roomCode.isEmpty() || username.isEmpty()) {
                 JOptionPane.showMessageDialog(frame, "Please fill in all fields.",
@@ -404,9 +419,9 @@ public class whiteboardGUI {
 
             serverIp = ip;
             client   = new WhiteboardClient(networkListener);
-            if (!client.connect(ip, WhiteboardServer.DEFAULT_PORT)) {
+            if (!client.connect(ip, port)) {
                 JOptionPane.showMessageDialog(frame,
-                    "Could not connect to server at " + ip + ":" + WhiteboardServer.DEFAULT_PORT,
+                    "Could not connect to server at " + ip + ":" + port,
                     "Connection Failed", JOptionPane.ERROR_MESSAGE);
                 client = null;
                 return;

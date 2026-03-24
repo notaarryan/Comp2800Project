@@ -22,13 +22,6 @@ public class whiteboardGUI {
 
     public static void main(String[] args) {
         // Start the embedded server in the background; if port is already taken, it exits quietly
-        Thread serverThread = new Thread(
-            () -> new WhiteboardServer(WhiteboardServer.DEFAULT_PORT).start(),
-            "EmbeddedServer"
-        );
-        serverThread.setDaemon(true);
-        serverThread.start();
-
         try {
             UIManager.setLookAndFeel("javax.swing.plaf.nimbus.NimbusLookAndFeel");
         } catch (Exception ignored) {}
@@ -350,14 +343,21 @@ public class whiteboardGUI {
 
             String ip       = ipField.getText().trim();
             String username = nameField.getText().trim();
-            int port;
-            try { port = Integer.parseInt(portField.getText().trim()); }
-            catch (NumberFormatException ex) { port = WhiteboardServer.DEFAULT_PORT; }
+            int parsedPort;
+            try { parsedPort = Integer.parseInt(portField.getText().trim()); }
+            catch (NumberFormatException ex) { parsedPort = WhiteboardServer.DEFAULT_PORT; }
+            final int port = parsedPort;
             if (ip.isEmpty() || username.isEmpty()) {
                 JOptionPane.showMessageDialog(frame, "Please fill in all fields.",
                     "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
+
+            // Start the embedded server (fails silently if port is already bound)
+            Thread st = new Thread(() -> new WhiteboardServer(port).start(), "EmbeddedServer");
+            st.setDaemon(true);
+            st.start();
+            try { Thread.sleep(400); } catch (InterruptedException ignored) {}
 
             // Connect then request room creation
             serverIp = ip;

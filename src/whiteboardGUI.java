@@ -21,6 +21,14 @@ public class whiteboardGUI {
     private JFrame frame;
 
     public static void main(String[] args) {
+        // Start the embedded server in the background; if port is already taken, it exits quietly
+        Thread serverThread = new Thread(
+            () -> new WhiteboardServer(WhiteboardServer.DEFAULT_PORT).start(),
+            "EmbeddedServer"
+        );
+        serverThread.setDaemon(true);
+        serverThread.start();
+
         try {
             UIManager.setLookAndFeel("javax.swing.plaf.nimbus.NimbusLookAndFeel");
         } catch (Exception ignored) {}
@@ -131,6 +139,7 @@ public class whiteboardGUI {
             @Override
             public void onUserLeft(String username) {
                 SwingUtilities.invokeLater(() -> {
+                    canvas.removeRemoteCursor(username);
                     String current = roomInfoLabel.getText();
                     roomInfoLabel.setText(current + "  [-" + username + " left]");
                     new javax.swing.Timer(3000, ev -> {
@@ -149,11 +158,18 @@ public class whiteboardGUI {
             }
 
             @Override
+            public void onCursor(String username, int x, int y) {
+                SwingUtilities.invokeLater(() -> canvas.applyRemoteCursor(username, x, y));
+            }
+
+            @Override
             public void onError(String message) {
                 SwingUtilities.invokeLater(() -> {
                     if (!inRoom) { // never joined a room — clean up so user can retry
                         if (client != null) { client.disconnect(); client = null; }
                         canvas.setNetworkClient(null);
+                        canvas.setLocalUsername(null);
+                        canvas.clearRemoteCursors();
                         serverIp = null;
                         roomInfoLabel.setText("No Room");
                     }
@@ -344,6 +360,7 @@ public class whiteboardGUI {
                 client = null;
                 return;
             }
+            canvas.setLocalUsername(username);
             client.createRoom(username);
             // Response handled asynchronously in onRoomCreated()
         });
@@ -361,7 +378,7 @@ public class whiteboardGUI {
 
             // Prompt for all join credentials
             JPanel inputPanel = new JPanel(new GridLayout(4, 2, 6, 6));
-            JTextField ipField       = new JTextField();
+            JTextField ipField       = new JTextField(getLocalIP());
             JTextField roomIdField   = new JTextField();
             JTextField roomCodeField = new JTextField();
             JTextField nameField     = new JTextField();
@@ -394,6 +411,7 @@ public class whiteboardGUI {
                 client = null;
                 return;
             }
+            canvas.setLocalUsername(username);
             client.joinRoom(roomId, roomCode, username);
             // Response handled asynchronously in onRoomJoined() / onError()
         });
@@ -410,6 +428,8 @@ public class whiteboardGUI {
             if (client != null) { client.disconnect(); client = null; }
             inRoom = false;
             canvas.setNetworkClient(null);
+            canvas.setLocalUsername(null);
+            canvas.clearRemoteCursors();
             serverIp = null;
             roomInfoLabel.setText("No Room");
         });

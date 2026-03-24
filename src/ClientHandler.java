@@ -60,6 +60,7 @@ public class ClientHandler implements Runnable {
             case "DRAW"         -> forwardToRoom("DRAW "        + payload);
             case "SHAPE"        -> forwardToRoom("SHAPE "       + payload);
             case "CLEAR"        -> forwardToRoom("CLEAR");
+            case "CURSOR"       -> forwardToRoom("CURSOR "       + payload);
             case "BEGIN_SYNC"   -> forwardToRoom("BEGIN_SYNC");
             case "STROKE_LINE"  -> forwardToRoom("STROKE_LINE " + payload);
             case "END_SYNC"     -> forwardToRoom("END_SYNC");

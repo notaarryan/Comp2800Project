@@ -1,6 +1,7 @@
 import java.awt.*;
 import java.awt.event.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import javax.swing.*;
 
 class CanvasPanel extends JPanel {
@@ -51,6 +52,8 @@ class CanvasPanel extends JPanel {
 
     // Networking: null when not in a collaborative session
     private WhiteboardClient networkClient = null;
+    private HashMap<String, Point> remoteCursors = new HashMap<>();
+    private String localUsername = null;
 
     public CanvasPanel() {
         setBackground(Color.WHITE);
@@ -137,7 +140,15 @@ class CanvasPanel extends JPanel {
                 } else {
                     currentDragPoint = e.getPoint();
                 }
+                if (networkClient != null && localUsername != null)
+                    networkClient.sendCursor(localUsername, e.getX(), e.getY());
                 repaint();
+            }
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                if (networkClient != null && localUsername != null)
+                    networkClient.sendCursor(localUsername, e.getX(), e.getY());
             }
         });
     }
@@ -174,6 +185,20 @@ class CanvasPanel extends JPanel {
         // Preview
         if (!currentShape.equals("Free Draw") && shapeStart != null && currentDragPoint != null) {
             drawShape(g2, currentShape, shapeStart, currentDragPoint, currentColor, currentWidth);
+        }
+
+        // Remote cursors — drawn on top of everything
+        g2.setFont(new Font("SansSerif", Font.BOLD, 11));
+        for (java.util.Map.Entry<String, Point> entry : remoteCursors.entrySet()) {
+            String name = entry.getKey();
+            Point p = entry.getValue();
+            Color cc = getCursorColor(name);
+            g2.setColor(cc);
+            g2.fillOval(p.x - 5, p.y - 5, 10, 10);
+            g2.setColor(cc.darker());
+            g2.drawOval(p.x - 5, p.y - 5, 10, 10);
+            g2.setColor(cc);
+            g2.drawString(name, p.x + 8, p.y - 4);
         }
     }
 
@@ -344,5 +369,27 @@ class CanvasPanel extends JPanel {
         strokes.clear(); strokes.addAll(newStrokes);
         shapes.clear();  shapes.addAll(newShapes);
         repaint();
+    }
+
+    public void setLocalUsername(String name) { localUsername = name; }
+
+    public void applyRemoteCursor(String username, int x, int y) {
+        remoteCursors.put(username, new Point(x, y));
+        repaint();
+    }
+
+    public void removeRemoteCursor(String username) {
+        remoteCursors.remove(username);
+        repaint();
+    }
+
+    public void clearRemoteCursors() {
+        remoteCursors.clear();
+        repaint();
+    }
+
+    private Color getCursorColor(String username) {
+        float hue = Math.abs(username.hashCode() % 360) / 360.0f;
+        return Color.getHSBColor(hue, 0.75f, 0.90f);
     }
 }

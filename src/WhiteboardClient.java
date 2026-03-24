@@ -19,6 +19,7 @@ public class WhiteboardClient {
         void onUserLeft(String username);
         void onError(String message);
         void onEndSync(ArrayList<CanvasPanel.Stroke> strokes, ArrayList<CanvasPanel.ShapeItem> shapes);
+        void onCursor(String username, int x, int y);
     }
 
     private Socket socket;
@@ -126,6 +127,11 @@ public class WhiteboardClient {
                 if (syncing) listener.onEndSync(new ArrayList<>(syncStrokes), new ArrayList<>(syncShapes));
                 syncing = false;
             }
+            case "CURSOR" -> {
+                if (parts.length >= 4)
+                    listener.onCursor(parts[1],
+                        Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
+            }
         }
     }
 
@@ -138,6 +144,9 @@ public class WhiteboardClient {
         send("SHAPE " + type + " " + sx + " " + sy + " " + ex + " " + ey + " " + colorHex + " " + brushSize);
     }
     public void sendClear() { send("CLEAR"); }
+    public void sendCursor(String username, int x, int y) {
+        send("CURSOR " + username + " " + x + " " + y);
+    }
 
     // Sends full canvas state — called after undo/redo so all peers stay in sync
     public void sendFullSync(ArrayList<CanvasPanel.Stroke> strokes, ArrayList<CanvasPanel.ShapeItem> shapes) {

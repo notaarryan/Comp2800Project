@@ -83,7 +83,7 @@ public class WhiteboardDB {
                 y           INT NOT NULL,
                 point_order INT NOT NULL
             );
-            -- UPDATED SHAPES TABLE (with ordering)
+            -- NEW SHAPES TABLE
             CREATE TABLE IF NOT EXISTS shapes (
                 id SERIAL PRIMARY KEY,
                 whiteboard_id INT REFERENCES whiteboards(id) ON DELETE CASCADE,
@@ -95,8 +95,7 @@ public class WhiteboardDB {
                 color_r INT,
                 color_g INT,
                 color_b INT,
-                stroke_width FLOAT,
-                shape_order INT
+                stroke_width FLOAT
             );
             """;
 
@@ -120,9 +119,7 @@ public class WhiteboardDB {
         String insertBoard  = "INSERT INTO whiteboards (name) VALUES (?) RETURNING id";
         String insertStroke = "INSERT INTO strokes (whiteboard_id, color_r, color_g, color_b, stroke_width, stroke_order) VALUES (?,?,?,?,?,?) RETURNING id";
         String insertPoint  = "INSERT INTO stroke_points (stroke_id, x, y, point_order) VALUES (?,?,?,?)";
-
-        // UPDATED INSERT (with shape_order)
-        String insertShape  = "INSERT INTO shapes (whiteboard_id, type, start_x, start_y, end_x, end_y, color_r, color_g, color_b, stroke_width, shape_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+        String insertShape  = "INSERT INTO shapes (whiteboard_id, type, start_x, start_y, end_x, end_y, color_r, color_g, color_b, stroke_width) VALUES (?,?,?,?,?,?,?,?,?,?)";
 
         try (Connection conn = connect()) {
             conn.setAutoCommit(false);
@@ -165,11 +162,9 @@ public class WhiteboardDB {
                 }
             }
 
-            // save shapes with order
+            // save shapes 
             try (PreparedStatement ps = conn.prepareStatement(insertShape)) {
-                for (int i = 0; i < shapes.size(); i++) {
-                    CanvasPanel.ShapeItem s = shapes.get(i);
-
+                for (CanvasPanel.ShapeItem s : shapes) {
                     ps.setInt(1, boardId);
                     ps.setString(2, s.type);
                     ps.setInt(3, s.start.x);
@@ -180,7 +175,6 @@ public class WhiteboardDB {
                     ps.setInt(8, s.color.getGreen());
                     ps.setInt(9, s.color.getBlue());
                     ps.setFloat(10, s.width);
-                    ps.setInt(11, i); // order fix 
                     ps.addBatch();
                 }
                 ps.executeBatch();
@@ -208,8 +202,7 @@ public class WhiteboardDB {
             ORDER BY point_order
             """;
 
-        // order fix 
-        String queryShapes = "SELECT * FROM shapes WHERE whiteboard_id = ? ORDER BY shape_order";
+        String queryShapes = "SELECT * FROM shapes WHERE whiteboard_id = ?";
 
         ArrayList<CanvasPanel.Stroke> strokes = new ArrayList<>();
         ArrayList<CanvasPanel.ShapeItem> shapes = new ArrayList<>();

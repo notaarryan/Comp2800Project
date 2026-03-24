@@ -34,7 +34,7 @@ class CanvasPanel extends JPanel {
     private ArrayList<Stroke> strokes = new ArrayList<>();
     private ArrayList<ShapeItem> shapes = new ArrayList<>();
 
-    // undo/redo stacks added 
+    // --- Undo/Redo ---
     private ArrayList<Object> history = new ArrayList<>();
     private ArrayList<Object> redoStack = new ArrayList<>();
 
@@ -65,28 +65,24 @@ class CanvasPanel extends JPanel {
                     currentStroke.points.add(e.getPoint());
                     strokes.add(currentStroke);
 
-                    // track for undo
-                    history.add(currentStroke);
-                    redoStack.clear();
+                    // save for undo
+                    saveState(currentStroke);
                 }
             }
 
             @Override
             public void mouseReleased(MouseEvent e) {
                 if (!currentShape.equals("Free Draw") && shapeStart != null) {
-                    ShapeItem newShape = new ShapeItem(
+                    shapes.add(new ShapeItem(
                         currentShape,
                         shapeStart,
                         e.getPoint(),
                         currentColor,
                         currentWidth
-                    );
+                    ));
 
-                    shapes.add(newShape);
-
-                    // track for undo 
-                    history.add(newShape);
-                    redoStack.clear();
+                    // save for undo
+                    saveState(shapes.get(shapes.size() - 1));
 
                     shapeStart = null;
                     currentDragPoint = null;
@@ -106,6 +102,11 @@ class CanvasPanel extends JPanel {
                 repaint();
             }
         });
+    }
+
+    private void saveState(Object obj) {
+        history.add(obj);
+        redoStack.clear();
     }
 
     @Override
@@ -147,7 +148,7 @@ class CanvasPanel extends JPanel {
         int w = Math.abs(start.x - end.x);
         int h = Math.abs(start.y - end.y);
 
-        switch (type) {
+        switch (type) { // switch statement to handle type of shapes being drawn 
             case "Rectangle":
                 g2.drawRect(x, y, w, h);
                 break;
@@ -193,8 +194,7 @@ class CanvasPanel extends JPanel {
         }
     }
 
-    // undo method added 
-    public void undo() {
+    public void undo() { // undo method 
         if (history.isEmpty()) return;
 
         Object last = history.remove(history.size() - 1);
@@ -209,17 +209,16 @@ class CanvasPanel extends JPanel {
         repaint();
     }
 
-    // redo method added
-    public void redo() {
+    public void redo() { // redo method 
         if (redoStack.isEmpty()) return;
 
-        Object item = redoStack.remove(redoStack.size() - 1);
-        history.add(item);
+        Object obj = redoStack.remove(redoStack.size() - 1);
+        history.add(obj);
 
-        if (item instanceof Stroke) {
-            strokes.add((Stroke) item);
-        } else if (item instanceof ShapeItem) {
-            shapes.add((ShapeItem) item);
+        if (obj instanceof Stroke) {
+            strokes.add((Stroke) obj);
+        } else if (obj instanceof ShapeItem) {
+            shapes.add((ShapeItem) obj);
         }
 
         repaint();
@@ -229,7 +228,7 @@ class CanvasPanel extends JPanel {
         currentShape = mode;
     }
 
-    public ArrayList<ShapeItem> getShapes() {
+    public ArrayList<ShapeItem> getShapes() { // getShapes method 
         return shapes;
     }
 
@@ -260,8 +259,8 @@ class CanvasPanel extends JPanel {
     public void clearCanvas() {
         strokes.clear();
         shapes.clear();
-        history.clear();      // also clear undo history
-        redoStack.clear();    // clear redo
+        history.clear();
+        redoStack.clear();
         repaint();
     }
 

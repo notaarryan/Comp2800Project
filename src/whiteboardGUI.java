@@ -119,7 +119,7 @@ public class whiteboardGUI {
         toolbar.add(Box.createHorizontalStrut(10));
 
         String[] shapes = {"Free Draw", "Rectangle", "Square", "Circle", "Triangle", "Diamond", "Star"};
-        JComboBox<String> shapeBox = new JComboBox<>(shapes); // combo box to select the shapes 
+        JComboBox<String> shapeBox = new JComboBox<>(shapes);
         shapeBox.setBackground(new Color(65,65,80));
         shapeBox.setForeground(new Color(210,210,220));
 
@@ -129,6 +129,16 @@ public class whiteboardGUI {
         });
 
         toolbar.add(shapeBox);
+
+        // new undo button - Marko - 3/24/26
+        JButton undoBtn = createToolButton("Undo");
+        undoBtn.addActionListener(e -> canvas.undo());
+        toolbar.add(undoBtn);
+
+        // new redo button - Marko - 3/24/26
+        JButton redoBtn = createToolButton("Redo");
+        redoBtn.addActionListener(e -> canvas.redo());
+        toolbar.add(redoBtn);
 
         // --- Clear button ---
         JButton clearBtn = createToolButton("Clear");
@@ -180,120 +190,4 @@ public class whiteboardGUI {
         frame.setVisible(true);
     }
 
-    private static void handleDelete(JFrame parent) {
-        try {
-            WhiteboardDB.initSchema();
-            List<WhiteboardDB.SavedBoard> boards = WhiteboardDB.listSaved();
-
-            if (boards.isEmpty()) {
-                JOptionPane.showMessageDialog(parent,
-                    "No saved whiteboards found.", "Delete", JOptionPane.INFORMATION_MESSAGE);
-                return;
-            }
-
-            JList<WhiteboardDB.SavedBoard> list = new JList<>(boards.toArray(new WhiteboardDB.SavedBoard[0]));
-            list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-            list.setSelectedIndex(0);
-            list.setVisibleRowCount(8);
-
-            int result = JOptionPane.showConfirmDialog(parent,
-                new JScrollPane(list), "Select a whiteboard to delete",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-
-            if (result != JOptionPane.OK_OPTION || list.getSelectedValue() == null) return;
-
-            WhiteboardDB.SavedBoard selected = list.getSelectedValue();
-            int confirm = JOptionPane.showConfirmDialog(parent,
-                "Delete \"" + selected.name + "\"? This cannot be undone.",
-                "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-
-            if (confirm != JOptionPane.YES_OPTION) return;
-
-            WhiteboardDB.delete(selected.id);
-            JOptionPane.showMessageDialog(parent,
-                "\"" + selected.name + "\" deleted.",
-                "Deleted", JOptionPane.INFORMATION_MESSAGE);
-
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(parent,
-                "Delete failed:\n" + ex.getMessage(),
-                "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    private static void handleSave(CanvasPanel canvas, JFrame parent) {
-        String name = JOptionPane.showInputDialog(parent,
-            "Enter a name for this whiteboard:", "Save Whiteboard",
-            JOptionPane.PLAIN_MESSAGE);
-        if (name == null || name.isBlank()) return;
-
-        try {
-            WhiteboardDB.initSchema();
-            int id = WhiteboardDB.save(name.trim(), canvas.getStrokes(), canvas.getShapes()); // updated to handle shapes aswell
-            JOptionPane.showMessageDialog(parent,
-                "Saved as \"" + name.trim() + "\" (id " + id + ")",
-                "Saved", JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(parent,
-                "Save failed:\n" + ex.getMessage(),
-                "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    private static void handleLoad(CanvasPanel canvas, JFrame parent) {
-        try {
-            WhiteboardDB.initSchema();
-            List<WhiteboardDB.SavedBoard> boards = WhiteboardDB.listSaved();
-
-            if (boards.isEmpty()) {
-                JOptionPane.showMessageDialog(parent,
-                    "No saved whiteboards found.", "Load", JOptionPane.INFORMATION_MESSAGE);
-                return;
-            }
-
-            JList<WhiteboardDB.SavedBoard> list = new JList<>(boards.toArray(new WhiteboardDB.SavedBoard[0]));
-            list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-            list.setSelectedIndex(0);
-            list.setVisibleRowCount(8);
-
-            int result = JOptionPane.showConfirmDialog(parent,
-                new JScrollPane(list), "Select a whiteboard to load",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-
-            if (result != JOptionPane.OK_OPTION || list.getSelectedValue() == null) return;
-
-            WhiteboardDB.SavedBoard selected = list.getSelectedValue();
-            WhiteboardDB.LoadedData data = WhiteboardDB.load(selected.id);
-            canvas.loadStrokes(data.strokes);         // updated to handle shapes aswell 
-            canvas.loadShapes(data.shapes);
-
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(parent,
-                "Load failed:\n" + ex.getMessage(),
-                "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    private static <T extends AbstractButton> T createToolButton(String label) {
-        AbstractButton btn;
-        if (label.equals("Eraser")) {
-            btn = new JToggleButton(label);
-        } else {
-            btn = new JButton(label);
-        }
-        btn.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        btn.setForeground(new Color(210, 210, 220));
-        btn.setBackground(new Color(65, 65, 80));
-        btn.setBorder(new CompoundBorder(
-            new LineBorder(new Color(80, 80, 100), 1, true),
-            new EmptyBorder(4, 12, 4, 12)
-        ));
-        btn.setFocusPainted(false);
-        btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        btn.setOpaque(true);
-
-        @SuppressWarnings("unchecked")
-        T result = (T) btn;
-        return result;
-    }
-}
+}  

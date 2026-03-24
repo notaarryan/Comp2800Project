@@ -2,6 +2,7 @@
 Marko Simic
 Whiteboard GUI Application
 3/10/25
+Updated: collaborative room support
 *******************/
 import java.awt.*;
 import java.util.List;
@@ -10,20 +11,52 @@ import javax.swing.border.*;
 
 public class whiteboardGUI {
 
+    // -------------------------------------------------------------------------
+    // Instance state (needed by the MessageListener anonymous class)
+    // -------------------------------------------------------------------------
+
+    /** Active network client; null when not in a room. */
+    private WhiteboardClient client;
+
+    /** Header label showing current room info. */
+    private JLabel roomInfoLabel;
+
+    /** The server IP this client is connected to (for display in Create Room dialog). */
+    private String serverIp;
+
+    /** Top-level window reference, used for centring dialogs. */
+    private JFrame frame;
+
+    // =========================================================================
+    // Entry point
+    // =========================================================================
+
     public static void main(String[] args) {
         try {
             UIManager.setLookAndFeel("javax.swing.plaf.nimbus.NimbusLookAndFeel");
         } catch (Exception ignored) {}
 
-        SwingUtilities.invokeLater(() -> buildAndShowGUI());
+        SwingUtilities.invokeLater(() -> new whiteboardGUI().buildAndShowGUI());
     }
 
-    private static void buildAndShowGUI() {
-        JFrame frame = new JFrame("Whiteboard");
+    // =========================================================================
+    // GUI construction
+    // =========================================================================
+
+    private void buildAndShowGUI() {
+        frame = new JFrame("Whiteboard");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(1100, 750);
         frame.setMinimumSize(new Dimension(700, 500));
         frame.setLocationRelativeTo(null);
+
+        // Disconnect cleanly when the window is closed
+        frame.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                if (client != null && client.isConnected()) client.disconnect();
+            }
+        });
 
         // --- Header bar ---
         JPanel header = new JPanel(new BorderLayout());
@@ -35,8 +68,117 @@ public class whiteboardGUI {
         title.setFont(new Font("SansSerif", Font.BOLD, 20));
         header.add(title, BorderLayout.WEST);
 
+        // Room status label — shown on the right side of the header
+        roomInfoLabel = new JLabel("No Room");
+        roomInfoLabel.setForeground(new Color(140, 190, 255));
+        roomInfoLabel.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        header.add(roomInfoLabel, BorderLayout.EAST);
+
         // --- Canvas ---
         CanvasPanel canvas = new CanvasPanel();
+
+        // =====================================================================
+        // MessageListener — bridges server events to canvas and UI updates.
+        //
+        // All callbacks arrive on the WB-Listener network thread.
+        // Every UI or canvas mutation is wrapped in SwingUtilities.invokeLater()
+        // to marshal the call back onto the Swing EDT safely.
+        // =====================================================================
+        WhiteboardClient.MessageListener networkListener = new WhiteboardClient.MessageListener() {
+
+            @Override
+            public void onDrawSegment(int x1, int y1, int x2, int y2,
+                                      String colorHex, float brushSize) {
+                // Apply remote freehand segment to the canvas on EDT
+                SwingUtilities.invokeLater(() ->
+                    canvas.applyRemoteSegment(x1, y1, x2, y2,
+                        WhiteboardClient.hexToColor(colorHex), brushSize)
+                );
+            }
+
+            @Override
+            public void onShape(String type, int startX, int startY,
+                                int endX, int endY, String colorHex, float brushSize) {
+                // Apply remote shape to the canvas on EDT
+                SwingUtilities.invokeLater(() ->
+                    canvas.applyRemoteShape(type, startX, startY, endX, endY,
+                        WhiteboardClient.hexToColor(colorHex), brushSize)
+                );
+            }
+
+            @Override
+            public void onClear() {
+                SwingUtilities.invokeLater(canvas::applyRemoteClear);
+            }
+
+            @Override
+            public void onRoomCreated(String roomId, String roomCode) {
+                // Server confirmed room creation — attach client to canvas and show info
+                SwingUtilities.invokeLater(() -> {
+                    canvas.setNetworkClient(client);
+                    roomInfoLabel.setText("Room: " + roomId + "  |  Code: " + roomCode);
+                    JOptionPane.showMessageDialog(frame,
+                        "Room created successfully!\n\n"
+                        + "Room ID:    " + roomId + "\n"
+                        + "Room Code:  " + roomCode + "\n"
+                        + "Server IP:  " + serverIp + "\n\n"
+                        + "Share the Room ID, Room Code, and Server IP\n"
+                        + "with collaborators so they can join.",
+                        "Room Created",
+                        JOptionPane.INFORMATION_MESSAGE);
+                });
+            }
+
+            @Override
+            public void onRoomJoined(String roomId, int userCount) {
+                // Server confirmed we joined an existing room
+                SwingUtilities.invokeLater(() -> {
+                    canvas.setNetworkClient(client);
+                    roomInfoLabel.setText("Room: " + roomId
+                            + "  |  Users: " + userCount);
+                });
+            }
+
+            @Override
+            public void onUserJoined(String username) {
+                // Update label instead of a blocking dialog to avoid interrupting drawing
+                SwingUtilities.invokeLater(() -> {
+                    String current = roomInfoLabel.getText();
+                    roomInfoLabel.setText(current + "  [+" + username + " joined]");
+                    // Reset label after 3 s so it doesn't get too long
+                    new javax.swing.Timer(3000, ev -> {
+                        // Re-read current text to avoid stale closure
+                        String t = roomInfoLabel.getText();
+                        if (t.contains("[+")) {
+                            roomInfoLabel.setText(t.replaceAll("\\s*\\[\\+.*?\\]", ""));
+                        }
+                    }) {{ setRepeats(false); start(); }};
+                });
+            }
+
+            @Override
+            public void onUserLeft(String username) {
+                SwingUtilities.invokeLater(() -> {
+                    String current = roomInfoLabel.getText();
+                    roomInfoLabel.setText(current + "  [-" + username + " left]");
+                    new javax.swing.Timer(3000, ev -> {
+                        String t = roomInfoLabel.getText();
+                        if (t.contains("[-")) {
+                            roomInfoLabel.setText(t.replaceAll("\\s*\\[-.*?\\]", ""));
+                        }
+                    }) {{ setRepeats(false); start(); }};
+                });
+            }
+
+            @Override
+            public void onError(String message) {
+                SwingUtilities.invokeLater(() ->
+                    JOptionPane.showMessageDialog(frame,
+                        "Server error:\n" + message,
+                        "Error", JOptionPane.ERROR_MESSAGE)
+                );
+            }
+        };
 
         // --- Toolbar ---
         JPanel toolbar = new JPanel();
@@ -119,7 +261,7 @@ public class whiteboardGUI {
         toolbar.add(Box.createHorizontalStrut(10));
 
         String[] shapes = {"Free Draw", "Rectangle", "Square", "Circle", "Triangle", "Diamond", "Star"};
-        JComboBox<String> shapeBox = new JComboBox<>(shapes); // combo box to select the shapes 
+        JComboBox<String> shapeBox = new JComboBox<>(shapes); // combo box to select the shapes
         shapeBox.setBackground(new Color(65,65,80));
         shapeBox.setForeground(new Color(210,210,220));
 
@@ -168,6 +310,130 @@ public class whiteboardGUI {
         deleteBtn.addActionListener(e -> handleDelete(frame));
         toolbar.add(deleteBtn);
 
+        // =====================================================================
+        // Collaborative room buttons — placed in a dedicated second toolbar row
+        // so they don't overflow the main toolbar.
+        // =====================================================================
+        JPanel collabBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+        collabBar.setBackground(new Color(36, 36, 48));
+        collabBar.setBorder(new EmptyBorder(0, 16, 0, 16));
+
+        JLabel collabLabel = new JLabel("Collab:");
+        collabLabel.setForeground(new Color(140, 190, 255));
+        collabLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
+        collabBar.add(collabLabel);
+
+        // --- Create Room ---
+        JButton createRoomBtn = createToolButton("Create Room");
+        createRoomBtn.addActionListener(e -> {
+            if (client != null && client.isConnected()) {
+                JOptionPane.showMessageDialog(frame,
+                    "Already in a room. Click 'Leave Room' first.",
+                    "Info", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+
+            // Prompt for server IP and username
+            JPanel inputPanel = new JPanel(new GridLayout(2, 2, 6, 6));
+            JTextField ipField   = new JTextField("localhost");
+            JTextField nameField = new JTextField();
+            inputPanel.add(new JLabel("Server IP:"));   inputPanel.add(ipField);
+            inputPanel.add(new JLabel("Your Name:"));   inputPanel.add(nameField);
+
+            int res = JOptionPane.showConfirmDialog(frame, inputPanel,
+                "Create Room", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+            if (res != JOptionPane.OK_OPTION) return;
+
+            String ip       = ipField.getText().trim();
+            String username = nameField.getText().trim();
+            if (ip.isEmpty() || username.isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "Please fill in all fields.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            // Connect then request room creation
+            serverIp = ip;
+            client   = new WhiteboardClient(networkListener);
+            if (!client.connect(ip, WhiteboardServer.DEFAULT_PORT)) {
+                JOptionPane.showMessageDialog(frame,
+                    "Could not connect to server at " + ip + ":" + WhiteboardServer.DEFAULT_PORT
+                    + "\n\nMake sure WhiteboardServer is running on that machine.",
+                    "Connection Failed", JOptionPane.ERROR_MESSAGE);
+                client = null;
+                return;
+            }
+            client.createRoom(username);
+            // Response handled asynchronously in onRoomCreated()
+        });
+        collabBar.add(createRoomBtn);
+
+        // --- Join Room ---
+        JButton joinRoomBtn = createToolButton("Join Room");
+        joinRoomBtn.addActionListener(e -> {
+            if (client != null && client.isConnected()) {
+                JOptionPane.showMessageDialog(frame,
+                    "Already in a room. Click 'Leave Room' first.",
+                    "Info", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+
+            // Prompt for all join credentials
+            JPanel inputPanel = new JPanel(new GridLayout(4, 2, 6, 6));
+            JTextField ipField       = new JTextField();
+            JTextField roomIdField   = new JTextField();
+            JTextField roomCodeField = new JTextField();
+            JTextField nameField     = new JTextField();
+            inputPanel.add(new JLabel("Server IP:"));   inputPanel.add(ipField);
+            inputPanel.add(new JLabel("Room ID:"));     inputPanel.add(roomIdField);
+            inputPanel.add(new JLabel("Room Code:"));   inputPanel.add(roomCodeField);
+            inputPanel.add(new JLabel("Your Name:"));   inputPanel.add(nameField);
+
+            int res = JOptionPane.showConfirmDialog(frame, inputPanel,
+                "Join Room", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+            if (res != JOptionPane.OK_OPTION) return;
+
+            String ip       = ipField.getText().trim();
+            String roomId   = roomIdField.getText().trim().toUpperCase();
+            String roomCode = roomCodeField.getText().trim();
+            String username = nameField.getText().trim();
+
+            if (ip.isEmpty() || roomId.isEmpty() || roomCode.isEmpty() || username.isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "Please fill in all fields.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            serverIp = ip;
+            client   = new WhiteboardClient(networkListener);
+            if (!client.connect(ip, WhiteboardServer.DEFAULT_PORT)) {
+                JOptionPane.showMessageDialog(frame,
+                    "Could not connect to server at " + ip + ":" + WhiteboardServer.DEFAULT_PORT,
+                    "Connection Failed", JOptionPane.ERROR_MESSAGE);
+                client = null;
+                return;
+            }
+            client.joinRoom(roomId, roomCode, username);
+            // Response handled asynchronously in onRoomJoined() / onError()
+        });
+        collabBar.add(joinRoomBtn);
+
+        // --- Leave Room ---
+        JButton leaveRoomBtn = createToolButton("Leave Room");
+        leaveRoomBtn.addActionListener(e -> {
+            if (client == null || !client.isConnected()) {
+                JOptionPane.showMessageDialog(frame, "Not currently in a room.",
+                    "Info", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            client.disconnect();
+            client = null;
+            canvas.setNetworkClient(null);
+            serverIp = null;
+            roomInfoLabel.setText("No Room");
+        });
+        collabBar.add(leaveRoomBtn);
+
         // --- Canvas wrapper ---
         JPanel canvasWrapper = new JPanel(new BorderLayout());
         canvasWrapper.setBackground(new Color(60, 60, 75));
@@ -180,9 +446,15 @@ public class whiteboardGUI {
         ));
         canvasWrapper.add(canvas, BorderLayout.CENTER);
 
+        // Stack the two toolbar rows, then canvas below
+        JPanel toolbarArea = new JPanel();
+        toolbarArea.setLayout(new BoxLayout(toolbarArea, BoxLayout.Y_AXIS));
+        toolbarArea.add(toolbar);
+        toolbarArea.add(collabBar);
+
         JPanel mainPanel = new JPanel(new BorderLayout());
         mainPanel.setBackground(new Color(60, 60, 75));
-        mainPanel.add(toolbar, BorderLayout.NORTH);
+        mainPanel.add(toolbarArea, BorderLayout.NORTH);
         mainPanel.add(canvasWrapper, BorderLayout.CENTER);
 
         frame.add(header, BorderLayout.NORTH);
@@ -190,7 +462,11 @@ public class whiteboardGUI {
         frame.setVisible(true);
     }
 
-    private static void handleDelete(JFrame parent) {
+    // =========================================================================
+    // DB actions (unchanged logic, converted from static to instance)
+    // =========================================================================
+
+    private void handleDelete(JFrame parent) {
         try {
             WhiteboardDB.initSchema();
             List<WhiteboardDB.SavedBoard> boards = WhiteboardDB.listSaved();
@@ -231,7 +507,7 @@ public class whiteboardGUI {
         }
     }
 
-    private static void handleSave(CanvasPanel canvas, JFrame parent) {
+    private void handleSave(CanvasPanel canvas, JFrame parent) {
         String name = JOptionPane.showInputDialog(parent,
             "Enter a name for this whiteboard:", "Save Whiteboard",
             JOptionPane.PLAIN_MESSAGE);
@@ -250,7 +526,7 @@ public class whiteboardGUI {
         }
     }
 
-    private static void handleLoad(CanvasPanel canvas, JFrame parent) {
+    private void handleLoad(CanvasPanel canvas, JFrame parent) {
         try {
             WhiteboardDB.initSchema();
             List<WhiteboardDB.SavedBoard> boards = WhiteboardDB.listSaved();
@@ -283,6 +559,10 @@ public class whiteboardGUI {
                 "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
+
+    // =========================================================================
+    // Button factory (kept static — no instance state needed)
+    // =========================================================================
 
     private static <T extends AbstractButton> T createToolButton(String label) {
         AbstractButton btn;

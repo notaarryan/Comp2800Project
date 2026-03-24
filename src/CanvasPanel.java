@@ -49,6 +49,9 @@ class CanvasPanel extends JPanel {
     private Point shapeStart = null;
     private Point currentDragPoint = null;
 
+    // Networking: null when not in a collaborative session
+    private WhiteboardClient networkClient = null;
+
     public CanvasPanel() {
         setBackground(Color.WHITE);
         setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
@@ -84,9 +87,32 @@ class CanvasPanel extends JPanel {
                     // save for undo
                     saveState(shapes.get(shapes.size() - 1));
 
+                    // Network: broadcast the completed shape to other clients
+                    if (networkClient != null) {
+                        ShapeItem added = shapes.get(shapes.size() - 1);
+                        networkClient.sendShape(
+                            added.type,
+                            added.start.x, added.start.y,
+                            added.end.x,   added.end.y,
+                            WhiteboardClient.colorToHex(added.color),
+                            added.width
+                        );
+                    }
+
                     shapeStart = null;
                     currentDragPoint = null;
                     repaint();
+
+                } else if (currentShape.equals("Free Draw") && currentStroke != null) {
+                    // Handle single click (no drag): send a dot so remote clients see it
+                    if (networkClient != null && currentStroke.points.size() == 1) {
+                        Point p = currentStroke.points.get(0);
+                        networkClient.sendDrawSegment(
+                            p.x, p.y, p.x, p.y,
+                            WhiteboardClient.colorToHex(currentColor),
+                            currentWidth
+                        );
+                    }
                 }
             }
         });
@@ -96,6 +122,18 @@ class CanvasPanel extends JPanel {
             public void mouseDragged(MouseEvent e) {
                 if (currentShape.equals("Free Draw")) {
                     currentStroke.points.add(e.getPoint());
+
+                    // Network: send the segment between the last two drag points
+                    if (networkClient != null && currentStroke.points.size() >= 2) {
+                        int n = currentStroke.points.size();
+                        Point p1 = currentStroke.points.get(n - 2);
+                        Point p2 = currentStroke.points.get(n - 1);
+                        networkClient.sendDrawSegment(
+                            p1.x, p1.y, p2.x, p2.y,
+                            WhiteboardClient.colorToHex(currentColor),
+                            currentWidth
+                        );
+                    }
                 } else {
                     currentDragPoint = e.getPoint();
                 }
@@ -257,6 +295,8 @@ class CanvasPanel extends JPanel {
     }
 
     public void clearCanvas() {
+        // Network: broadcast clear before wiping local state
+        if (networkClient != null) networkClient.sendClear();
         strokes.clear();
         shapes.clear();
         history.clear();
@@ -271,6 +311,62 @@ class CanvasPanel extends JPanel {
     public void loadStrokes(ArrayList<Stroke> loaded) {
         strokes.clear();
         strokes.addAll(loaded);
+        repaint();
+    }
+
+    // =========================================================================
+    // Collaborative networking
+    // =========================================================================
+
+    /**
+     * Attach (or detach) the network client.
+     * Call with a live WhiteboardClient after joining a room,
+     * and with null after leaving.
+     */
+    public void setNetworkClient(WhiteboardClient client) {
+        this.networkClient = client;
+    }
+
+    /**
+     * Apply a freehand segment received from a remote user.
+     * Creates a minimal 2-point Stroke so it renders with the correct
+     * color, width, and CAP_ROUND join — visually identical to local drawing.
+     *
+     * NOT added to the undo history: remote actions are not locally undoable.
+     * Must be called on the Swing EDT.
+     */
+    public void applyRemoteSegment(int x1, int y1, int x2, int y2,
+                                   java.awt.Color color, float width) {
+        Stroke seg = new Stroke(color, width);
+        seg.points.add(new Point(x1, y1));
+        seg.points.add(new Point(x2, y2));
+        strokes.add(seg); // directly into strokes list, bypassing saveState
+        repaint();
+    }
+
+    /**
+     * Apply a shape received from a remote user.
+     * NOT added to undo history.
+     * Must be called on the Swing EDT.
+     */
+    public void applyRemoteShape(String type, int startX, int startY,
+                                  int endX, int endY,
+                                  java.awt.Color color, float width) {
+        shapes.add(new ShapeItem(type, new Point(startX, startY),
+                                       new Point(endX, endY), color, width));
+        repaint();
+    }
+
+    /**
+     * Clear the canvas in response to a remote CLEAR event.
+     * Does NOT send another CLEAR back to the server (avoids loops).
+     * Must be called on the Swing EDT.
+     */
+    public void applyRemoteClear() {
+        strokes.clear();
+        shapes.clear();
+        history.clear();
+        redoStack.clear();
         repaint();
     }
 }

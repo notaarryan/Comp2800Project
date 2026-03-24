@@ -7,34 +7,18 @@ Updated: collaborative room support
 import java.awt.*;
 import java.net.Inet4Address;
 import java.net.NetworkInterface;
+import java.util.ArrayList;
 import java.util.List;
 import javax.swing.*;
 import javax.swing.border.*;
 
 public class whiteboardGUI {
 
-    // -------------------------------------------------------------------------
-    // Instance state (needed by the MessageListener anonymous class)
-    // -------------------------------------------------------------------------
-
-    /** Active network client; null when not connected. */
     private WhiteboardClient client;
-
-    /** True only after the server confirms ROOM_CREATED or ROOM_JOINED. */
-    private boolean inRoom = false;
-
-    /** Header label showing current room info. */
+    private boolean inRoom = false; // true only after ROOM_CREATED or ROOM_JOINED confirmed
     private JLabel roomInfoLabel;
-
-    /** The server IP this client is connected to (for display in Create Room dialog). */
     private String serverIp;
-
-    /** Top-level window reference, used for centring dialogs. */
     private JFrame frame;
-
-    // =========================================================================
-    // Entry point
-    // =========================================================================
 
     public static void main(String[] args) {
         try {
@@ -43,10 +27,6 @@ public class whiteboardGUI {
 
         SwingUtilities.invokeLater(() -> new whiteboardGUI().buildAndShowGUI());
     }
-
-    // =========================================================================
-    // GUI construction
-    // =========================================================================
 
     private void buildAndShowGUI() {
         frame = new JFrame("Whiteboard");
@@ -82,33 +62,22 @@ public class whiteboardGUI {
         // --- Canvas ---
         CanvasPanel canvas = new CanvasPanel();
 
-        // =====================================================================
-        // MessageListener — bridges server events to canvas and UI updates.
-        //
-        // All callbacks arrive on the WB-Listener network thread.
-        // Every UI or canvas mutation is wrapped in SwingUtilities.invokeLater()
-        // to marshal the call back onto the Swing EDT safely.
-        // =====================================================================
+        // All listener callbacks arrive on the network thread — invokeLater() marshals to EDT
         WhiteboardClient.MessageListener networkListener = new WhiteboardClient.MessageListener() {
 
             @Override
-            public void onDrawSegment(int x1, int y1, int x2, int y2,
-                                      String colorHex, float brushSize) {
-                // Apply remote freehand segment to the canvas on EDT
+            public void onDrawSegment(int x1, int y1, int x2, int y2, String colorHex, float brushSize) {
                 SwingUtilities.invokeLater(() ->
                     canvas.applyRemoteSegment(x1, y1, x2, y2,
-                        WhiteboardClient.hexToColor(colorHex), brushSize)
-                );
+                        WhiteboardClient.hexToColor(colorHex), brushSize));
             }
 
             @Override
             public void onShape(String type, int startX, int startY,
                                 int endX, int endY, String colorHex, float brushSize) {
-                // Apply remote shape to the canvas on EDT
                 SwingUtilities.invokeLater(() ->
                     canvas.applyRemoteShape(type, startX, startY, endX, endY,
-                        WhiteboardClient.hexToColor(colorHex), brushSize)
-                );
+                        WhiteboardClient.hexToColor(colorHex), brushSize));
             }
 
             @Override
@@ -118,33 +87,27 @@ public class whiteboardGUI {
 
             @Override
             public void onRoomCreated(String roomId, String roomCode) {
-                // Server confirmed room creation — attach client to canvas and show info
                 SwingUtilities.invokeLater(() -> {
                     inRoom = true;
                     canvas.setNetworkClient(client);
                     roomInfoLabel.setText("Room: " + roomId + "  |  Code: " + roomCode);
-                    // Show the machine's actual LAN IP so the host can share it
-                    String lanIp = getLocalIP();
                     JOptionPane.showMessageDialog(frame,
                         "Room created successfully!\n\n"
                         + "Room ID:    " + roomId + "\n"
                         + "Room Code:  " + roomCode + "\n"
-                        + "Server IP:  " + lanIp + "\n\n"
+                        + "Server IP:  " + getLocalIP() + "\n\n"
                         + "Share the Room ID, Room Code, and Server IP\n"
                         + "with collaborators so they can join.",
-                        "Room Created",
-                        JOptionPane.INFORMATION_MESSAGE);
+                        "Room Created", JOptionPane.INFORMATION_MESSAGE);
                 });
             }
 
             @Override
             public void onRoomJoined(String roomId, int userCount) {
-                // Server confirmed we joined an existing room
                 SwingUtilities.invokeLater(() -> {
                     inRoom = true;
                     canvas.setNetworkClient(client);
-                    roomInfoLabel.setText("Room: " + roomId
-                            + "  |  Users: " + userCount);
+                    roomInfoLabel.setText("Room: " + roomId + "  |  Users: " + userCount);
                 });
             }
 
@@ -180,18 +143,21 @@ public class whiteboardGUI {
             }
 
             @Override
+            public void onEndSync(ArrayList<CanvasPanel.Stroke> strokes,
+                                  ArrayList<CanvasPanel.ShapeItem> shapes) {
+                SwingUtilities.invokeLater(() -> canvas.applyFullSync(strokes, shapes));
+            }
+
+            @Override
             public void onError(String message) {
                 SwingUtilities.invokeLater(() -> {
-                    // If we never successfully joined a room, the connection is
-                    // useless — clean up so the user can try again immediately.
-                    if (!inRoom) {
+                    if (!inRoom) { // never joined a room — clean up so user can retry
                         if (client != null) { client.disconnect(); client = null; }
                         canvas.setNetworkClient(null);
                         serverIp = null;
                         roomInfoLabel.setText("No Room");
                     }
-                    JOptionPane.showMessageDialog(frame,
-                        "Server error:\n" + message,
+                    JOptionPane.showMessageDialog(frame, "Server error:\n" + message,
                         "Error", JOptionPane.ERROR_MESSAGE);
                 });
             }
@@ -327,10 +293,7 @@ public class whiteboardGUI {
         deleteBtn.addActionListener(e -> handleDelete(frame));
         toolbar.add(deleteBtn);
 
-        // =====================================================================
-        // Collaborative room buttons — placed in a dedicated second toolbar row
-        // so they don't overflow the main toolbar.
-        // =====================================================================
+        // Collab buttons in a second row so they don't overflow the main toolbar
         JPanel collabBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
         collabBar.setBackground(new Color(36, 36, 48));
         collabBar.setBorder(new EmptyBorder(0, 16, 0, 16));
@@ -480,10 +443,6 @@ public class whiteboardGUI {
         frame.setVisible(true);
     }
 
-    // =========================================================================
-    // DB actions (unchanged logic, converted from static to instance)
-    // =========================================================================
-
     private void handleDelete(JFrame parent) {
         try {
             WhiteboardDB.initSchema();
@@ -578,18 +537,7 @@ public class whiteboardGUI {
         }
     }
 
-    // =========================================================================
-    // Network utilities
-    // =========================================================================
-
-    /**
-     * Returns this machine's LAN IPv4 address (e.g. "192.168.1.42").
-     * Skips loopback and inactive interfaces. Falls back to "localhost"
-     * if nothing is found (e.g. no network connection).
-     *
-     * This is what the host should share with collaborators on the same WiFi —
-     * "localhost" only works on the machine running the server itself.
-     */
+    // Returns this machine's LAN IP — "localhost" only works on the machine running the server
     private static String getLocalIP() {
         try {
             java.util.Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
@@ -605,10 +553,6 @@ public class whiteboardGUI {
         } catch (Exception ignored) {}
         return "localhost";
     }
-
-    // =========================================================================
-    // Button factory (kept static — no instance state needed)
-    // =========================================================================
 
     private static <T extends AbstractButton> T createToolButton(String label) {
         AbstractButton btn;

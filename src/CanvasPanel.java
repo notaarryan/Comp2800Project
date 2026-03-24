@@ -232,7 +232,7 @@ class CanvasPanel extends JPanel {
         }
     }
 
-    public void undo() { // undo method 
+    public void undo() { // undo method
         if (history.isEmpty()) return;
 
         Object last = history.remove(history.size() - 1);
@@ -245,9 +245,10 @@ class CanvasPanel extends JPanel {
         }
 
         repaint();
+        if (networkClient != null) networkClient.sendFullSync(strokes, shapes);
     }
 
-    public void redo() { // redo method 
+    public void redo() { // redo method
         if (redoStack.isEmpty()) return;
 
         Object obj = redoStack.remove(redoStack.size() - 1);
@@ -260,6 +261,7 @@ class CanvasPanel extends JPanel {
         }
 
         repaint();
+        if (networkClient != null) networkClient.sendFullSync(strokes, shapes);
     }
 
     public void setShapeMode(String mode) {
@@ -295,7 +297,6 @@ class CanvasPanel extends JPanel {
     }
 
     public void clearCanvas() {
-        // Network: broadcast clear before wiping local state
         if (networkClient != null) networkClient.sendClear();
         strokes.clear();
         shapes.clear();
@@ -314,59 +315,34 @@ class CanvasPanel extends JPanel {
         repaint();
     }
 
-    // =========================================================================
-    // Collaborative networking
-    // =========================================================================
-
-    /**
-     * Attach (or detach) the network client.
-     * Call with a live WhiteboardClient after joining a room,
-     * and with null after leaving.
-     */
     public void setNetworkClient(WhiteboardClient client) {
         this.networkClient = client;
     }
 
-    /**
-     * Apply a freehand segment received from a remote user.
-     * Creates a minimal 2-point Stroke so it renders with the correct
-     * color, width, and CAP_ROUND join — visually identical to local drawing.
-     *
-     * NOT added to the undo history: remote actions are not locally undoable.
-     * Must be called on the Swing EDT.
-     */
-    public void applyRemoteSegment(int x1, int y1, int x2, int y2,
-                                   java.awt.Color color, float width) {
+    // Remote draw: not added to undo history so local undo only affects local strokes
+    public void applyRemoteSegment(int x1, int y1, int x2, int y2, java.awt.Color color, float width) {
         Stroke seg = new Stroke(color, width);
         seg.points.add(new Point(x1, y1));
         seg.points.add(new Point(x2, y2));
-        strokes.add(seg); // directly into strokes list, bypassing saveState
+        strokes.add(seg);
         repaint();
     }
 
-    /**
-     * Apply a shape received from a remote user.
-     * NOT added to undo history.
-     * Must be called on the Swing EDT.
-     */
     public void applyRemoteShape(String type, int startX, int startY,
-                                  int endX, int endY,
-                                  java.awt.Color color, float width) {
-        shapes.add(new ShapeItem(type, new Point(startX, startY),
-                                       new Point(endX, endY), color, width));
+                                 int endX, int endY, java.awt.Color color, float width) {
+        shapes.add(new ShapeItem(type, new Point(startX, startY), new Point(endX, endY), color, width));
         repaint();
     }
 
-    /**
-     * Clear the canvas in response to a remote CLEAR event.
-     * Does NOT send another CLEAR back to the server (avoids loops).
-     * Must be called on the Swing EDT.
-     */
     public void applyRemoteClear() {
-        strokes.clear();
-        shapes.clear();
-        history.clear();
-        redoStack.clear();
+        strokes.clear(); shapes.clear(); history.clear(); redoStack.clear();
+        repaint();
+    }
+
+    // Replace canvas after a remote undo/redo; local history stays intact
+    public void applyFullSync(ArrayList<Stroke> newStrokes, ArrayList<ShapeItem> newShapes) {
+        strokes.clear(); strokes.addAll(newStrokes);
+        shapes.clear();  shapes.addAll(newShapes);
         repaint();
     }
 }

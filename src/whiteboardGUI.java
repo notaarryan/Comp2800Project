@@ -5,6 +5,8 @@ Whiteboard GUI Application
 Updated: collaborative room support
 *******************/
 import java.awt.*;
+import java.net.Inet4Address;
+import java.net.NetworkInterface;
 import java.util.List;
 import javax.swing.*;
 import javax.swing.border.*;
@@ -15,8 +17,11 @@ public class whiteboardGUI {
     // Instance state (needed by the MessageListener anonymous class)
     // -------------------------------------------------------------------------
 
-    /** Active network client; null when not in a room. */
+    /** Active network client; null when not connected. */
     private WhiteboardClient client;
+
+    /** True only after the server confirms ROOM_CREATED or ROOM_JOINED. */
+    private boolean inRoom = false;
 
     /** Header label showing current room info. */
     private JLabel roomInfoLabel;
@@ -115,13 +120,16 @@ public class whiteboardGUI {
             public void onRoomCreated(String roomId, String roomCode) {
                 // Server confirmed room creation — attach client to canvas and show info
                 SwingUtilities.invokeLater(() -> {
+                    inRoom = true;
                     canvas.setNetworkClient(client);
                     roomInfoLabel.setText("Room: " + roomId + "  |  Code: " + roomCode);
+                    // Show the machine's actual LAN IP so the host can share it
+                    String lanIp = getLocalIP();
                     JOptionPane.showMessageDialog(frame,
                         "Room created successfully!\n\n"
                         + "Room ID:    " + roomId + "\n"
                         + "Room Code:  " + roomCode + "\n"
-                        + "Server IP:  " + serverIp + "\n\n"
+                        + "Server IP:  " + lanIp + "\n\n"
                         + "Share the Room ID, Room Code, and Server IP\n"
                         + "with collaborators so they can join.",
                         "Room Created",
@@ -133,6 +141,7 @@ public class whiteboardGUI {
             public void onRoomJoined(String roomId, int userCount) {
                 // Server confirmed we joined an existing room
                 SwingUtilities.invokeLater(() -> {
+                    inRoom = true;
                     canvas.setNetworkClient(client);
                     roomInfoLabel.setText("Room: " + roomId
                             + "  |  Users: " + userCount);
@@ -172,11 +181,19 @@ public class whiteboardGUI {
 
             @Override
             public void onError(String message) {
-                SwingUtilities.invokeLater(() ->
+                SwingUtilities.invokeLater(() -> {
+                    // If we never successfully joined a room, the connection is
+                    // useless — clean up so the user can try again immediately.
+                    if (!inRoom) {
+                        if (client != null) { client.disconnect(); client = null; }
+                        canvas.setNetworkClient(null);
+                        serverIp = null;
+                        roomInfoLabel.setText("No Room");
+                    }
                     JOptionPane.showMessageDialog(frame,
                         "Server error:\n" + message,
-                        "Error", JOptionPane.ERROR_MESSAGE)
-                );
+                        "Error", JOptionPane.ERROR_MESSAGE);
+                });
             }
         };
 
@@ -326,7 +343,7 @@ public class whiteboardGUI {
         // --- Create Room ---
         JButton createRoomBtn = createToolButton("Create Room");
         createRoomBtn.addActionListener(e -> {
-            if (client != null && client.isConnected()) {
+            if (inRoom) {
                 JOptionPane.showMessageDialog(frame,
                     "Already in a room. Click 'Leave Room' first.",
                     "Info", JOptionPane.INFORMATION_MESSAGE);
@@ -334,8 +351,9 @@ public class whiteboardGUI {
             }
 
             // Prompt for server IP and username
+            // Pre-fill with the LAN IP so the host connects to their own server correctly
             JPanel inputPanel = new JPanel(new GridLayout(2, 2, 6, 6));
-            JTextField ipField   = new JTextField("localhost");
+            JTextField ipField   = new JTextField(getLocalIP());
             JTextField nameField = new JTextField();
             inputPanel.add(new JLabel("Server IP:"));   inputPanel.add(ipField);
             inputPanel.add(new JLabel("Your Name:"));   inputPanel.add(nameField);
@@ -371,7 +389,7 @@ public class whiteboardGUI {
         // --- Join Room ---
         JButton joinRoomBtn = createToolButton("Join Room");
         joinRoomBtn.addActionListener(e -> {
-            if (client != null && client.isConnected()) {
+            if (inRoom) {
                 JOptionPane.showMessageDialog(frame,
                     "Already in a room. Click 'Leave Room' first.",
                     "Info", JOptionPane.INFORMATION_MESSAGE);
@@ -421,13 +439,13 @@ public class whiteboardGUI {
         // --- Leave Room ---
         JButton leaveRoomBtn = createToolButton("Leave Room");
         leaveRoomBtn.addActionListener(e -> {
-            if (client == null || !client.isConnected()) {
+            if (!inRoom) {
                 JOptionPane.showMessageDialog(frame, "Not currently in a room.",
                     "Info", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
-            client.disconnect();
-            client = null;
+            if (client != null) { client.disconnect(); client = null; }
+            inRoom = false;
             canvas.setNetworkClient(null);
             serverIp = null;
             roomInfoLabel.setText("No Room");
@@ -558,6 +576,34 @@ public class whiteboardGUI {
                 "Load failed:\n" + ex.getMessage(),
                 "Error", JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    // =========================================================================
+    // Network utilities
+    // =========================================================================
+
+    /**
+     * Returns this machine's LAN IPv4 address (e.g. "192.168.1.42").
+     * Skips loopback and inactive interfaces. Falls back to "localhost"
+     * if nothing is found (e.g. no network connection).
+     *
+     * This is what the host should share with collaborators on the same WiFi —
+     * "localhost" only works on the machine running the server itself.
+     */
+    private static String getLocalIP() {
+        try {
+            java.util.Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+            while (ifaces.hasMoreElements()) {
+                NetworkInterface iface = ifaces.nextElement();
+                if (iface.isLoopback() || !iface.isUp()) continue;
+                java.util.Enumeration<java.net.InetAddress> addrs = iface.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    java.net.InetAddress addr = addrs.nextElement();
+                    if (addr instanceof Inet4Address) return addr.getHostAddress();
+                }
+            }
+        } catch (Exception ignored) {}
+        return "localhost";
     }
 
     // =========================================================================

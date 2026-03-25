@@ -15,9 +15,12 @@ import javax.swing.border.*;
 public class whiteboardGUI {
 
     private WhiteboardClient client;
-    private boolean inRoom = false; // true only after ROOM_CREATED or ROOM_JOINED confirmed
+    private boolean inRoom = false;
     private JLabel roomInfoLabel;
     private String serverIp;
+    private int serverPort = WhiteboardServer.DEFAULT_PORT;
+    private String currentRoomId = null;
+    private String currentRoomCode = null;
     private JFrame frame;
 
     public static void main(String[] args) {
@@ -90,15 +93,17 @@ public class whiteboardGUI {
             public void onRoomCreated(String roomId, String roomCode) {
                 SwingUtilities.invokeLater(() -> {
                     inRoom = true;
+                    currentRoomId   = roomId;
+                    currentRoomCode = roomCode;
                     canvas.setNetworkClient(client);
-                    roomInfoLabel.setText("Room: " + roomId + "  |  Code: " + roomCode);
+                    updateRoomLabel();
                     JOptionPane.showMessageDialog(frame,
-                        "Room created successfully!\n\n"
-                        + "Room ID:    " + roomId + "\n"
-                        + "Room Code:  " + roomCode + "\n"
-                        + "Server IP:  " + getLocalIP() + "\n\n"
-                        + "Share the Room ID, Room Code, and Server IP\n"
-                        + "with collaborators so they can join.",
+                        "Room created!\n\n"
+                        + "Room ID:   " + roomId + "\n"
+                        + "Room Code: " + roomCode + "\n"
+                        + "IP:        " + serverIp + "\n"
+                        + "Port:      " + serverPort + "\n\n"
+                        + "Share these details with collaborators.",
                         "Room Created", JOptionPane.INFORMATION_MESSAGE);
                 });
             }
@@ -107,25 +112,17 @@ public class whiteboardGUI {
             public void onRoomJoined(String roomId, int userCount) {
                 SwingUtilities.invokeLater(() -> {
                     inRoom = true;
+                    currentRoomId = roomId;
                     canvas.setNetworkClient(client);
-                    roomInfoLabel.setText("Room: " + roomId + "  |  Users: " + userCount);
+                    updateRoomLabel();
                 });
             }
 
             @Override
             public void onUserJoined(String username) {
-                // Update label instead of a blocking dialog to avoid interrupting drawing
                 SwingUtilities.invokeLater(() -> {
-                    String current = roomInfoLabel.getText();
-                    roomInfoLabel.setText(current + "  [+" + username + " joined]");
-                    // Reset label after 3 s so it doesn't get too long
-                    new javax.swing.Timer(3000, ev -> {
-                        // Re-read current text to avoid stale closure
-                        String t = roomInfoLabel.getText();
-                        if (t.contains("[+")) {
-                            roomInfoLabel.setText(t.replaceAll("\\s*\\[\\+.*?\\]", ""));
-                        }
-                    }) {{ setRepeats(false); start(); }};
+                    roomInfoLabel.setText(roomLabel() + "  [+" + username + " joined]");
+                    new javax.swing.Timer(3000, ev -> updateRoomLabel()) {{ setRepeats(false); start(); }};
                 });
             }
 
@@ -133,14 +130,8 @@ public class whiteboardGUI {
             public void onUserLeft(String username) {
                 SwingUtilities.invokeLater(() -> {
                     canvas.removeRemoteCursor(username);
-                    String current = roomInfoLabel.getText();
-                    roomInfoLabel.setText(current + "  [-" + username + " left]");
-                    new javax.swing.Timer(3000, ev -> {
-                        String t = roomInfoLabel.getText();
-                        if (t.contains("[-")) {
-                            roomInfoLabel.setText(t.replaceAll("\\s*\\[-.*?\\]", ""));
-                        }
-                    }) {{ setRepeats(false); start(); }};
+                    roomInfoLabel.setText(roomLabel() + "  [-" + username + " left]");
+                    new javax.swing.Timer(3000, ev -> updateRoomLabel()) {{ setRepeats(false); start(); }};
                 });
             }
 
@@ -164,12 +155,14 @@ public class whiteboardGUI {
             @Override
             public void onError(String message) {
                 SwingUtilities.invokeLater(() -> {
-                    if (!inRoom) { // never joined a room — clean up so user can retry
+                    if (!inRoom) {
                         if (client != null) { client.disconnect(); client = null; }
+                        currentRoomId   = null;
+                        currentRoomCode = null;
+                        serverIp        = null;
                         canvas.setNetworkClient(null);
                         canvas.setLocalUsername(null);
                         canvas.clearRemoteCursors();
-                        serverIp = null;
                         roomInfoLabel.setText("No Room");
                     }
                     JOptionPane.showMessageDialog(frame, "Server error:\n" + message,
@@ -369,6 +362,7 @@ public class whiteboardGUI {
                 client = null;
                 return;
             }
+            serverPort = port;
             canvas.setLocalUsername(username);
             client.createRoom(username);
         });
@@ -415,7 +409,9 @@ public class whiteboardGUI {
                 return;
             }
 
-            serverIp = ip;
+            serverIp        = ip;
+            serverPort      = port;
+            currentRoomCode = roomCode;
             client   = new WhiteboardClient(networkListener);
             if (!client.connect(ip, port)) {
                 JOptionPane.showMessageDialog(frame,
@@ -440,10 +436,12 @@ public class whiteboardGUI {
             }
             if (client != null) { client.disconnect(); client = null; }
             inRoom = false;
+            currentRoomId   = null;
+            currentRoomCode = null;
+            serverIp        = null;
             canvas.setNetworkClient(null);
             canvas.setLocalUsername(null);
             canvas.clearRemoteCursors();
-            serverIp = null;
             roomInfoLabel.setText("No Room");
         });
         collabBar.add(leaveRoomBtn);
@@ -568,6 +566,19 @@ public class whiteboardGUI {
                 "Load failed:\n" + ex.getMessage(),
                 "Error", JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    private String roomLabel() {
+        if (!inRoom || currentRoomId == null) return "No Room";
+        String code = (currentRoomCode != null) ? currentRoomCode : "—";
+        String ip   = (serverIp != null) ? serverIp : "—";
+        return "Room: " + currentRoomId
+             + "  |  Code: " + code
+             + "  |  IP: " + ip + ":" + serverPort;
+    }
+
+    private void updateRoomLabel() {
+        roomInfoLabel.setText(roomLabel());
     }
 
     // Returns this machine's LAN IP — "localhost" only works on the machine running the server

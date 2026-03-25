@@ -353,8 +353,8 @@ public class whiteboardGUI {
                 return;
             }
 
-            // Start the embedded server (fails silently if port is already bound)
-            Thread st = new Thread(() -> new WhiteboardServer(port).start(), "EmbeddedServer");
+            // Server always binds on DEFAULT_PORT locally; the dialog's IP/port is the ngrok/public address clients connect through
+            Thread st = new Thread(() -> new WhiteboardServer(WhiteboardServer.DEFAULT_PORT).start(), "EmbeddedServer");
             st.setDaemon(true);
             st.start();
             try { Thread.sleep(400); } catch (InterruptedException ignored) {}

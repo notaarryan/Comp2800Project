@@ -328,79 +328,49 @@ public class whiteboardGUI {
                 return;
             }
 
-            // Show a non-blocking status label while server + ngrok start
-            JLabel status = new JLabel("Starting server and getting ngrok address...", SwingConstants.CENTER);
-            JDialog waitDialog = new JDialog(frame, "Please wait", true);
-            waitDialog.add(status);
-            waitDialog.pack();
-            waitDialog.setLocationRelativeTo(frame);
+            JPanel inputPanel = new JPanel(new GridLayout(3, 2, 6, 6));
+            JTextField ipField   = new JTextField(getLocalIP());
+            JTextField portField = new JTextField(String.valueOf(WhiteboardServer.DEFAULT_PORT));
+            JTextField nameField = new JTextField();
+            inputPanel.add(new JLabel("Server IP:"));   inputPanel.add(ipField);
+            inputPanel.add(new JLabel("Port:"));        inputPanel.add(portField);
+            inputPanel.add(new JLabel("Your Name:"));   inputPanel.add(nameField);
 
-            new javax.swing.SwingWorker<String[], Void>() {
-                @Override
-                protected String[] doInBackground() {
-                    // Start embedded server
-                    Thread st = new Thread(
-                        () -> new WhiteboardServer(WhiteboardServer.DEFAULT_PORT).start(),
-                        "EmbeddedServer"
-                    );
-                    st.setDaemon(true);
-                    st.start();
-                    try { Thread.sleep(400); } catch (InterruptedException ignored) {}
-                    // Try to start ngrok and get the public address
-                    return tryGetNgrokAddress(WhiteboardServer.DEFAULT_PORT);
-                }
+            int res = JOptionPane.showConfirmDialog(frame, inputPanel,
+                "Create Room", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+            if (res != JOptionPane.OK_OPTION) return;
 
-                @Override
-                protected void done() {
-                    waitDialog.dispose();
-                    String[] ngrok;
-                    try { ngrok = get(); } catch (Exception ex) { ngrok = null; }
+            String ip       = ipField.getText().trim();
+            String username = nameField.getText().trim();
+            int parsedPort;
+            try { parsedPort = Integer.parseInt(portField.getText().trim()); }
+            catch (NumberFormatException ex) { parsedPort = WhiteboardServer.DEFAULT_PORT; }
+            final int port = parsedPort;
 
-                    String defaultIp   = (ngrok != null) ? ngrok[0] : getLocalIP();
-                    String defaultPort = (ngrok != null) ? ngrok[1]
-                                                         : String.valueOf(WhiteboardServer.DEFAULT_PORT);
+            if (ip.isEmpty() || username.isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "Please fill in all fields.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
 
-                    JPanel inputPanel = new JPanel(new GridLayout(3, 2, 6, 6));
-                    JTextField ipField   = new JTextField(defaultIp);
-                    JTextField portField = new JTextField(defaultPort);
-                    JTextField nameField = new JTextField();
-                    inputPanel.add(new JLabel("Server IP:"));   inputPanel.add(ipField);
-                    inputPanel.add(new JLabel("Port:"));        inputPanel.add(portField);
-                    inputPanel.add(new JLabel("Your Name:"));   inputPanel.add(nameField);
+            // Start the embedded server (fails silently if port is already bound)
+            Thread st = new Thread(() -> new WhiteboardServer(port).start(), "EmbeddedServer");
+            st.setDaemon(true);
+            st.start();
+            try { Thread.sleep(400); } catch (InterruptedException ignored) {}
 
-                    int res = JOptionPane.showConfirmDialog(frame, inputPanel,
-                        "Create Room", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-                    if (res != JOptionPane.OK_OPTION) return;
-
-                    String ip       = ipField.getText().trim();
-                    String username = nameField.getText().trim();
-                    int parsedPort2;
-                    try { parsedPort2 = Integer.parseInt(portField.getText().trim()); }
-                    catch (NumberFormatException ex) { parsedPort2 = WhiteboardServer.DEFAULT_PORT; }
-                    final int port = parsedPort2;
-
-                    if (ip.isEmpty() || username.isEmpty()) {
-                        JOptionPane.showMessageDialog(frame, "Please fill in all fields.",
-                            "Error", JOptionPane.ERROR_MESSAGE);
-                        return;
-                    }
-
-                    serverIp = ip;
-                    client   = new WhiteboardClient(networkListener);
-                    if (!client.connect(ip, port)) {
-                        JOptionPane.showMessageDialog(frame,
-                            "Could not connect to server at " + ip + ":" + port
-                            + "\n\nMake sure WhiteboardServer is running on that machine.",
-                            "Connection Failed", JOptionPane.ERROR_MESSAGE);
-                        client = null;
-                        return;
-                    }
-                    canvas.setLocalUsername(username);
-                    client.createRoom(username);
-                }
-            }.execute();
-
-            waitDialog.setVisible(true); // blocks EDT until worker calls waitDialog.dispose()
+            serverIp = ip;
+            client   = new WhiteboardClient(networkListener);
+            if (!client.connect(ip, port)) {
+                JOptionPane.showMessageDialog(frame,
+                    "Could not connect to server at " + ip + ":" + port
+                    + "\n\nMake sure WhiteboardServer is running on that machine.",
+                    "Connection Failed", JOptionPane.ERROR_MESSAGE);
+                client = null;
+                return;
+            }
+            canvas.setLocalUsername(username);
+            client.createRoom(username);
         });
         collabBar.add(createRoomBtn);
 
@@ -598,46 +568,6 @@ public class whiteboardGUI {
                 "Load failed:\n" + ex.getMessage(),
                 "Error", JOptionPane.ERROR_MESSAGE);
         }
-    }
-
-    // Starts ngrok tcp tunnel and returns [host, port], or null if ngrok is unavailable
-    private static String[] tryGetNgrokAddress(int port) {
-        try {
-            new ProcessBuilder("ngrok", "tcp", String.valueOf(port))
-                .redirectErrorStream(true)
-                .start();
-        } catch (Exception e) {
-            return null; // ngrok not installed
-        }
-        // Poll the ngrok local API until the tunnel is ready (up to 10 s)
-        for (int i = 0; i < 20; i++) {
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-            String url = fetchNgrokTunnelUrl();
-            if (url != null) return parseNgrokUrl(url);
-        }
-        return null;
-    }
-
-    private static String fetchNgrokTunnelUrl() {
-        try {
-            java.net.URI uri = new java.net.URI("http://localhost:4040/api/tunnels");
-            try (java.io.InputStream is = uri.toURL().openStream()) {
-                String json = new String(is.readAllBytes());
-                int idx = json.indexOf("\"public_url\":\"tcp://");
-                if (idx >= 0) {
-                    String rest = json.substring(idx + 20);
-                    return rest.substring(0, rest.indexOf('"'));
-                }
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
-
-    // Splits "0.tcp.ngrok.io:12345" into ["0.tcp.ngrok.io", "12345"]
-    private static String[] parseNgrokUrl(String addr) {
-        int colon = addr.lastIndexOf(':');
-        if (colon < 0) return null;
-        return new String[]{ addr.substring(0, colon), addr.substring(colon + 1) };
     }
 
     // Returns this machine's LAN IP — "localhost" only works on the machine running the server

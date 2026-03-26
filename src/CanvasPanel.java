@@ -1,6 +1,7 @@
 import java.awt.*;
 import java.awt.event.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import javax.swing.*;
 
 class CanvasPanel extends JPanel {
@@ -78,6 +79,11 @@ class CanvasPanel extends JPanel {
     private Rectangle  textBoxBounds = null;
 
     // ── constructor ──────────────────────────────────────────────────────────
+
+    // Networking: null when not in a collaborative session
+    private WhiteboardClient networkClient = null;
+    private HashMap<String, Point> remoteCursors = new HashMap<>();
+    private String localUsername = null;
 
     public CanvasPanel() {
         setBackground(Color.WHITE);
@@ -163,9 +169,30 @@ class CanvasPanel extends JPanel {
                     shapes.add(si);
                     drawOrder.add(si);
                     saveState(si);
+                    if (networkClient != null) {
+                        networkClient.sendShape(
+                            si.type,
+                            si.start.x, si.start.y,
+                            si.end.x,   si.end.y,
+                            WhiteboardClient.colorToHex(si.color),
+                            si.width
+                        );
+                    }
+
                     shapeStart = null;
                     currentDragPoint = null;
                     repaint();
+
+                } else if (currentShape.equals("Free Draw") && currentStroke != null) {
+                    // Handle single click (no drag): send a dot so remote clients see it
+                    if (networkClient != null && currentStroke.points.size() == 1) {
+                        Point p = currentStroke.points.get(0);
+                        networkClient.sendDrawSegment(
+                            p.x, p.y, p.x, p.y,
+                            WhiteboardClient.colorToHex(currentColor),
+                            currentWidth
+                        );
+                    }
                 }
             }
         });
@@ -194,13 +221,31 @@ class CanvasPanel extends JPanel {
                 // ── FREE DRAW ──
                 if (currentShape.equals("Free Draw") && currentStroke != null) {
                     currentStroke.points.add(e.getPoint());
+                    if (networkClient != null && currentStroke.points.size() >= 2) {
+                        int n = currentStroke.points.size();
+                        Point p1 = currentStroke.points.get(n - 2);
+                        Point p2 = currentStroke.points.get(n - 1);
+                        networkClient.sendDrawSegment(
+                            p1.x, p1.y, p2.x, p2.y,
+                            WhiteboardClient.colorToHex(currentColor),
+                            currentWidth
+                        );
+                    }
                     repaint();
                     return;
                 }
 
                 // ── SHAPE / TEXT preview ──
                 currentDragPoint = e.getPoint();
+                if (networkClient != null && localUsername != null)
+                    networkClient.sendCursor(localUsername, e.getX(), e.getY());
                 repaint();
+            }
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                if (networkClient != null && localUsername != null)
+                    networkClient.sendCursor(localUsername, e.getX(), e.getY());
             }
         });
     }
@@ -325,6 +370,20 @@ class CanvasPanel extends JPanel {
                 drawShape(g2, currentShape, shapeStart, currentDragPoint,
                     currentColor, currentWidth);
             }
+        }
+
+        // Remote cursors — drawn on top of everything
+        g2.setFont(new Font("SansSerif", Font.BOLD, 11));
+        for (java.util.Map.Entry<String, Point> entry : remoteCursors.entrySet()) {
+            String name = entry.getKey();
+            Point p = entry.getValue();
+            Color cc = getCursorColor(name);
+            g2.setColor(cc);
+            g2.fillOval(p.x - 5, p.y - 5, 10, 10);
+            g2.setColor(cc.darker());
+            g2.drawOval(p.x - 5, p.y - 5, 10, 10);
+            g2.setColor(cc);
+            g2.drawString(name, p.x + 8, p.y - 4);
         }
     }
 
@@ -470,6 +529,7 @@ class CanvasPanel extends JPanel {
             for (Object obj : ma.items) translateItem(obj, -ma.dx, -ma.dy);
         }
         repaint();
+        if (networkClient != null) networkClient.sendFullSync(strokes, shapes);
     }
 
     public void redo() {
@@ -484,6 +544,7 @@ class CanvasPanel extends JPanel {
             for (Object item : ma.items) translateItem(item, ma.dx, ma.dy);
         }
         repaint();
+        if (networkClient != null) networkClient.sendFullSync(strokes, shapes);
     }
 
     // ── public API ───────────────────────────────────────────────────────────
@@ -513,6 +574,7 @@ public void setCurrentColor(Color c) {
     }
 
     public void clearCanvas() {
+        if (networkClient != null) networkClient.sendClear();
         strokes.clear(); shapes.clear(); texts.clear(); drawOrder.clear();
         history.clear(); redoStack.clear();
         selectedItems.clear(); marquee = null;
@@ -527,4 +589,60 @@ public void setCurrentColor(Color c) {
     public void loadStrokes(ArrayList<Stroke> loaded)   { strokes.clear(); strokes.addAll(loaded); drawOrder.addAll(loaded); repaint(); }
     public void loadShapes(ArrayList<ShapeItem> loaded) { shapes.clear();  shapes.addAll(loaded);  drawOrder.addAll(loaded); repaint(); }
     public void loadTexts(ArrayList<TextItem> loaded)   { texts.clear();   texts.addAll(loaded);   drawOrder.addAll(loaded); repaint(); }
+
+    public void setNetworkClient(WhiteboardClient client) { this.networkClient = client; }
+
+    // Remote draw: not added to undo history so local undo only affects local strokes
+    public void applyRemoteSegment(int x1, int y1, int x2, int y2, java.awt.Color color, float width) {
+        Stroke seg = new Stroke(color, width);
+        seg.points.add(new Point(x1, y1));
+        seg.points.add(new Point(x2, y2));
+        strokes.add(seg);
+        drawOrder.add(seg);
+        repaint();
+    }
+
+    public void applyRemoteShape(String type, int startX, int startY,
+                                 int endX, int endY, java.awt.Color color, float width) {
+        ShapeItem si = new ShapeItem(type, new Point(startX, startY), new Point(endX, endY), color, width);
+        shapes.add(si);
+        drawOrder.add(si);
+        repaint();
+    }
+
+    public void applyRemoteClear() {
+        strokes.clear(); shapes.clear(); texts.clear(); drawOrder.clear();
+        history.clear(); redoStack.clear();
+        repaint();
+    }
+
+    // Replace canvas after a remote undo/redo; local history stays intact
+    public void applyFullSync(ArrayList<Stroke> newStrokes, ArrayList<ShapeItem> newShapes) {
+        strokes.clear(); strokes.addAll(newStrokes);
+        shapes.clear();  shapes.addAll(newShapes);
+        drawOrder.clear(); drawOrder.addAll(newStrokes); drawOrder.addAll(newShapes);
+        repaint();
+    }
+
+    public void setLocalUsername(String name) { localUsername = name; }
+
+    public void applyRemoteCursor(String username, int x, int y) {
+        remoteCursors.put(username, new Point(x, y));
+        repaint();
+    }
+
+    public void removeRemoteCursor(String username) {
+        remoteCursors.remove(username);
+        repaint();
+    }
+
+    public void clearRemoteCursors() {
+        remoteCursors.clear();
+        repaint();
+    }
+
+    private Color getCursorColor(String username) {
+        float hue = Math.abs(username.hashCode() % 360) / 360.0f;
+        return Color.getHSBColor(hue, 0.75f, 0.90f);
+    }
 }

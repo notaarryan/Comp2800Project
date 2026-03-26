@@ -57,12 +57,7 @@ public class whiteboardGUI {
         colorPreview.setBackground(Color.BLACK);
 
         colorBtn.addActionListener(e -> {
-            Color selectedColor = JColorChooser.showDialog(
-                null,
-                "Choose Brush Color",
-                Color.BLACK
-            );
-
+            Color selectedColor = JColorChooser.showDialog(null, "Choose Brush Color", colorPreview.getBackground());
             if (selectedColor != null) {
                 canvas.setCurrentColor(selectedColor);
                 colorPreview.setBackground(selectedColor);
@@ -76,35 +71,28 @@ public class whiteboardGUI {
         toolbar.add(Box.createHorizontalStrut(10));
 
         JLabel brushLabel = new JLabel("Brush:");
-        brushLabel.setForeground(new Color(210,210,220));
+        brushLabel.setForeground(new Color(210, 210, 220));
         toolbar.add(brushLabel);
 
         JSlider brushSlider = new JSlider(1, 30, 6);
         brushSlider.setPreferredSize(new Dimension(120, 40));
-        brushSlider.setBackground(new Color(45,45,58));
+        brushSlider.setBackground(new Color(45, 45, 58));
 
         var brushPreview = new JPanel() {
             private int size = 6;
-
-            public void setSizeValue(int s) {
-                size = s;
-                repaint();
-            }
-
+            public void setSizeValue(int s) { size = s; repaint(); }
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
                 g.setColor(Color.BLACK);
-
                 int x = (getWidth() - size) / 2;
                 int y = (getHeight() - size) / 2;
-
                 g.fillOval(x, y, size, size);
             }
         };
 
         brushPreview.setPreferredSize(new Dimension(40, 40));
-        brushPreview.setBackground(new Color(45,45,58));
+        brushPreview.setBackground(new Color(45, 45, 58));
 
         brushSlider.addChangeListener(e -> {
             int size = brushSlider.getValue();
@@ -115,27 +103,29 @@ public class whiteboardGUI {
         toolbar.add(brushSlider);
         toolbar.add(brushPreview);
 
-        // shape selector added
+        // --- Shape / mode selector ---
         toolbar.add(Box.createHorizontalStrut(10));
 
-        String[] shapes = {"Free Draw", "Rectangle", "Square", "Circle", "Triangle", "Diamond", "Star"};
-        JComboBox<String> shapeBox = new JComboBox<>(shapes); // combo box to select the shapes 
-        shapeBox.setBackground(new Color(65,65,80));
-        shapeBox.setForeground(new Color(210,210,220));
+        String[] shapes = {"Free Draw", "Select", "Text", "Rectangle", "Square", "Circle", "Triangle", "Diamond", "Star"};
+        JComboBox<String> shapeBox = new JComboBox<>(shapes);
+        shapeBox.setBackground(new Color(65, 65, 80));
+        shapeBox.setForeground(new Color(210, 210, 220));
 
         shapeBox.addActionListener(e -> {
             String selected = (String) shapeBox.getSelectedItem();
             canvas.setShapeMode(selected);
+            eraserBtn.setSelected(false);
+            canvas.setEraserMode(false);
         });
 
         toolbar.add(shapeBox);
 
-        // new undo button - Marko - 3/24/26
+        // --- Undo button ---
         JButton undoBtn = createToolButton("Undo");
         undoBtn.addActionListener(e -> canvas.undo());
         toolbar.add(undoBtn);
 
-        // new redo button - Marko - 3/24/26
+        // --- Redo button ---
         JButton redoBtn = createToolButton("Redo");
         redoBtn.addActionListener(e -> canvas.redo());
         toolbar.add(redoBtn);

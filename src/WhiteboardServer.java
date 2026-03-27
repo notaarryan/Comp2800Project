@@ -3,8 +3,6 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-// Standalone whiteboard server — run with: java WhiteboardServer [port]
-// Can be deployed on any cloud VM (Azure, AWS, Render, etc.)
 public class WhiteboardServer {
 
     public static final int DEFAULT_PORT = 8000;

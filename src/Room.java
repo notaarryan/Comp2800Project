@@ -1,8 +1,6 @@
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-// One collaborative whiteboard session on the server.
-// CopyOnWriteArrayList keeps the client list thread-safe during broadcast.
 public class Room {
 
     final String roomId;
@@ -20,7 +18,6 @@ public class Room {
     public int  getClientCount()                   { return clients.size(); }
     public boolean isEmpty()                       { return clients.isEmpty(); }
 
-    // Returns the first client in the room that isn't the given client (used to request a canvas sync)
     public ClientHandler getFirstClient(ClientHandler exclude) {
         for (ClientHandler c : clients) {
             if (c != exclude) return c;
@@ -28,14 +25,12 @@ public class Room {
         return null;
     }
 
-    // Send to everyone except the sender (used for draw events)
     public void broadcast(String message, ClientHandler sender) {
         for (ClientHandler client : clients) {
             if (client != sender) client.sendMessage(message);
         }
     }
 
-    // Send to everyone including the sender (used for system notifications)
     public void broadcastAll(String message) {
         for (ClientHandler client : clients) client.sendMessage(message);
     }

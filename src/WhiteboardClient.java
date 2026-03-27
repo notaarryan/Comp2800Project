@@ -4,9 +4,6 @@ import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
 
-// Client-side networking layer. Manages one TCP connection to WhiteboardServer.
-// A daemon thread reads incoming messages and dispatches them to MessageListener.
-// All listener callbacks arrive on the network thread — use SwingUtilities.invokeLater() for UI updates.
 public class WhiteboardClient {
 
     public interface MessageListener {
@@ -21,6 +18,7 @@ public class WhiteboardClient {
         void onEndSync(ArrayList<CanvasPanel.Stroke> strokes, ArrayList<CanvasPanel.ShapeItem> shapes);
         void onCursor(String username, int x, int y);
         void onSyncRequested();
+        void onChat(String username, String message);
     }
 
     private Socket socket;
@@ -28,8 +26,6 @@ public class WhiteboardClient {
     private BufferedReader in;
     private final MessageListener listener;
     private volatile boolean connected = false;
-
-    // Accumulates state during a BEGIN_SYNC … END_SYNC block
     private boolean syncing = false;
     private final ArrayList<CanvasPanel.Stroke> syncStrokes = new ArrayList<>();
     private final ArrayList<CanvasPanel.ShapeItem> syncShapes = new ArrayList<>();
@@ -88,7 +84,6 @@ public class WhiteboardClient {
             case "SHAPE" -> {
                 if (parts.length >= 8) {
                     if (syncing) {
-                        // during sync: accumulate instead of applying immediately
                         syncShapes.add(new CanvasPanel.ShapeItem(
                             parts[1],
                             new Point(Integer.parseInt(parts[2]), Integer.parseInt(parts[3])),
@@ -134,6 +129,15 @@ public class WhiteboardClient {
                         Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
             }
             case "REQUEST_SYNC" -> listener.onSyncRequested();
+            case "CHAT" -> {
+                int firstSpace  = message.indexOf(' ');
+                int secondSpace = firstSpace >= 0 ? message.indexOf(' ', firstSpace + 1) : -1;
+                if (secondSpace >= 0) {
+                    String user = message.substring(firstSpace + 1, secondSpace);
+                    String msg  = message.substring(secondSpace + 1);
+                    listener.onChat(user, msg);
+                }
+            }
         }
     }
 
@@ -146,11 +150,13 @@ public class WhiteboardClient {
         send("SHAPE " + type + " " + sx + " " + sy + " " + ex + " " + ey + " " + colorHex + " " + brushSize);
     }
     public void sendClear() { send("CLEAR"); }
+    public void sendChat(String username, String message) {
+        send("CHAT " + username + " " + message.replace("\n", " "));
+    }
     public void sendCursor(String username, int x, int y) {
         send("CURSOR " + username + " " + x + " " + y);
     }
 
-    // Sends full canvas state — called after undo/redo so all peers stay in sync
     public void sendFullSync(ArrayList<CanvasPanel.Stroke> strokes, ArrayList<CanvasPanel.ShapeItem> shapes) {
         send("BEGIN_SYNC");
         for (CanvasPanel.Stroke stroke : strokes) {

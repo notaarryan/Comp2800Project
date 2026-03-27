@@ -6,10 +6,11 @@ CREATE TABLE users (
 );
 
 CREATE TABLE whiteboards (
-    id       SERIAL PRIMARY KEY,
-    user_id  INT          NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name     VARCHAR(255) NOT NULL,
-    saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id         SERIAL PRIMARY KEY,
+    user_id    INT          NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       VARCHAR(255) NOT NULL,
+    page_count INT          NOT NULL DEFAULT 1,
+    saved_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE strokes (
@@ -73,6 +74,17 @@ CREATE TABLE stickies (
     bg_r          INT,
     bg_g          INT,
     bg_b          INT
+);
+
+CREATE TABLE images (
+    id            SERIAL PRIMARY KEY,
+    whiteboard_id INT  NOT NULL REFERENCES whiteboards(id) ON DELETE CASCADE,
+    page_number   INT  NOT NULL DEFAULT 0,
+    x             INT,
+    y             INT,
+    width         INT,
+    height        INT,
+    data          TEXT NOT NULL
 );
 
 CREATE TABLE snapshots (

@@ -1,5 +1,6 @@
 import java.awt.Color;
 import java.awt.Point;
+import java.awt.image.BufferedImage;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -88,8 +89,8 @@ public class WhiteboardDB {
 
             int boardId;
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO whiteboards (user_id, name) VALUES (?,?) RETURNING id")) {
-                ps.setInt(1, userId); ps.setString(2, name);
+                    "INSERT INTO whiteboards (user_id, name, page_count) VALUES (?,?,?) RETURNING id")) {
+                ps.setInt(1, userId); ps.setString(2, name); ps.setInt(3, pages.size());
                 ResultSet rs = ps.executeQuery(); rs.next(); boardId = rs.getInt(1);
             }
 
@@ -149,6 +150,22 @@ public class WhiteboardDB {
                     }
                     ps.executeBatch();
                 }
+
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO images (whiteboard_id,page_number,x,y,width,height,data) VALUES (?,?,?,?,?,?,?)")) {
+                    for (CanvasPanel.ImageItem img : page.images) {
+                        try {
+                            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                            javax.imageio.ImageIO.write(img.image, "PNG", baos);
+                            String b64 = Base64.getEncoder().encodeToString(baos.toByteArray());
+                            ps.setInt(1, boardId); ps.setInt(2, pi);
+                            ps.setInt(3, img.pos.x); ps.setInt(4, img.pos.y);
+                            ps.setInt(5, img.width); ps.setInt(6, img.height);
+                            ps.setString(7, b64); ps.addBatch();
+                        } catch (java.io.IOException ignored) {}
+                    }
+                    ps.executeBatch();
+                }
             }
 
             conn.commit();
@@ -157,24 +174,17 @@ public class WhiteboardDB {
     }
 
     static ArrayList<CanvasPanel.Page> loadPages(int boardId) throws SQLException {
-        int maxPage = 0;
-        try (Connection conn = connect()) {
-            for (String q : new String[]{
-                    "SELECT MAX(page_number) FROM strokes WHERE whiteboard_id=?",
-                    "SELECT MAX(page_number) FROM shapes  WHERE whiteboard_id=?",
-                    "SELECT MAX(page_number) FROM texts   WHERE whiteboard_id=?",
-                    "SELECT MAX(page_number) FROM stickies WHERE whiteboard_id=?"}) {
-                try (PreparedStatement ps = conn.prepareStatement(q)) {
-                    ps.setInt(1, boardId);
-                    ResultSet rs = ps.executeQuery();
-                    if (rs.next() && rs.getObject(1) != null)
-                        maxPage = Math.max(maxPage, rs.getInt(1));
-                }
-            }
+        int pageCount = 1;
+        try (Connection conn = connect();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT page_count FROM whiteboards WHERE id=?")) {
+            ps.setInt(1, boardId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) pageCount = Math.max(1, rs.getInt("page_count"));
         }
 
         ArrayList<CanvasPanel.Page> pages = new ArrayList<>();
-        for (int i = 0; i <= maxPage; i++) pages.add(new CanvasPanel.Page("Page " + (i + 1)));
+        for (int i = 0; i < pageCount; i++) pages.add(new CanvasPanel.Page("Page " + (i + 1)));
 
         try (Connection conn = connect()) {
             try (PreparedStatement strokeStmt = conn.prepareStatement(
@@ -238,6 +248,25 @@ public class WhiteboardDB {
                     sn.width  = rs.getInt("width");
                     sn.height = rs.getInt("height");
                     pg.stickies.add(sn); pg.drawOrder.add(sn);
+                }
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT * FROM images WHERE whiteboard_id=? ORDER BY page_number")) {
+                ps.setInt(1, boardId);
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    CanvasPanel.Page pg = pages.get(rs.getInt("page_number"));
+                    try {
+                        byte[] bytes = Base64.getDecoder().decode(rs.getString("data"));
+                        BufferedImage bimg = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
+                        if (bimg != null) {
+                            CanvasPanel.ImageItem ii = new CanvasPanel.ImageItem(bimg, new Point(rs.getInt("x"), rs.getInt("y")));
+                            ii.width  = rs.getInt("width");
+                            ii.height = rs.getInt("height");
+                            pg.images.add(ii); pg.drawOrder.add(ii);
+                        }
+                    } catch (java.io.IOException ignored) {}
                 }
             }
         }
@@ -335,6 +364,15 @@ public class WhiteboardDB {
                   .append(sn.pos.x).append(',').append(sn.pos.y).append(',').append(sn.width).append(',').append(sn.height)
                   .append(',').append(b64(sn.text)).append('\n');
             }
+            for (CanvasPanel.ImageItem ii : page.images) {
+                try {
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    javax.imageio.ImageIO.write(ii.image, "PNG", baos);
+                    String imgB64 = Base64.getEncoder().encodeToString(baos.toByteArray());
+                    sb.append("I:").append(ii.pos.x).append(',').append(ii.pos.y).append(',')
+                      .append(ii.width).append(',').append(ii.height).append(',').append(imgB64).append('\n');
+                } catch (Exception ignored) {}
+            }
         }
         return sb.toString();
     }
@@ -380,6 +418,19 @@ public class WhiteboardDB {
                     new Point(Integer.parseInt(p[3]), Integer.parseInt(p[4])), bg);
                 sn.width = Integer.parseInt(p[5]); sn.height = Integer.parseInt(p[6]);
                 current.stickies.add(sn); current.drawOrder.add(sn);
+            } else if (line.startsWith("I:")) {
+                String[] p = line.substring(2).split(",", 5);
+                try {
+                    byte[] bytes = Base64.getDecoder().decode(p[4]);
+                    BufferedImage bimg = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
+                    if (bimg != null) {
+                        CanvasPanel.ImageItem ii = new CanvasPanel.ImageItem(bimg,
+                            new Point(Integer.parseInt(p[0]), Integer.parseInt(p[1])));
+                        ii.width  = Integer.parseInt(p[2]);
+                        ii.height = Integer.parseInt(p[3]);
+                        current.images.add(ii); current.drawOrder.add(ii);
+                    }
+                } catch (Exception ignored) {}
             }
         }
         if (pages.isEmpty()) pages.add(new CanvasPanel.Page("Page 1"));

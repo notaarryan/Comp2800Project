@@ -598,8 +598,6 @@ public class whiteboardGUI {
     }
 
     private boolean showLoginDialog() {
-        WhiteboardDB.initSchema();
-
         while (true) {
             JPanel panel = new JPanel(new GridBagLayout());
             panel.setBackground(new Color(40, 40, 52));
@@ -669,7 +667,6 @@ public class whiteboardGUI {
             "Enter a name for this whiteboard:", "Save Whiteboard", JOptionPane.PLAIN_MESSAGE);
         if (name == null || name.isBlank()) return;
         try {
-            WhiteboardDB.initSchema();
             int id = WhiteboardDB.save(name.trim(), currentUserId, canvas.getPages());
             JOptionPane.showMessageDialog(parent, "Saved as \"" + name.trim() + "\" (id " + id + ")",
                 "Saved", JOptionPane.INFORMATION_MESSAGE);
@@ -680,7 +677,6 @@ public class whiteboardGUI {
 
     private void handleLoad(CanvasPanel canvas, JFrame parent) {
         try {
-            WhiteboardDB.initSchema();
             List<WhiteboardDB.SavedBoard> boards = WhiteboardDB.listSaved(currentUserId);
             if (boards.isEmpty()) {
                 JOptionPane.showMessageDialog(parent, "No saved whiteboards found.", "Load", JOptionPane.INFORMATION_MESSAGE);
@@ -702,7 +698,6 @@ public class whiteboardGUI {
 
     private void handleDelete(JFrame parent) {
         try {
-            WhiteboardDB.initSchema();
             List<WhiteboardDB.SavedBoard> boards = WhiteboardDB.listSaved(currentUserId);
             if (boards.isEmpty()) {
                 JOptionPane.showMessageDialog(parent, "No saved whiteboards found.", "Delete", JOptionPane.INFORMATION_MESSAGE);

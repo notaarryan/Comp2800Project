@@ -24,6 +24,7 @@ public class whiteboardGUI {
     private String currentRoomCode = null;
     private JFrame frame;
     private int currentUserId = -1;
+    private int currentBoardId = -1;
     private String currentUsername = "";
     private JTextArea chatArea;
     private JSplitPane mainSplit;
@@ -159,6 +160,8 @@ public class whiteboardGUI {
                 SwingUtilities.invokeLater(() -> {
                     inRoom = true;
                     currentRoomId = roomId;
+                    currentBoardId = -1;
+                    canvas.loadPages(new java.util.ArrayList<>());
                     canvas.setNetworkClient(client);
                     updateRoomLabel();
                     chatPanel.setVisible(true);
@@ -668,7 +671,8 @@ public class whiteboardGUI {
         if (name == null || name.isBlank()) return;
         try {
             int id = WhiteboardDB.save(name.trim(), currentUserId, canvas.getPages());
-            JOptionPane.showMessageDialog(parent, "Saved as \"" + name.trim() + "\" (id " + id + ")",
+            currentBoardId = id;
+            JOptionPane.showMessageDialog(parent, "Saved as \"" + name.trim() + "\"",
                 "Saved", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(parent, "Save failed:\n" + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
@@ -689,7 +693,8 @@ public class whiteboardGUI {
             int result = JOptionPane.showConfirmDialog(parent, new JScrollPane(list),
                 "Select a whiteboard to load", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
             if (result != JOptionPane.OK_OPTION || list.getSelectedValue() == null) return;
-            ArrayList<CanvasPanel.Page> pages = WhiteboardDB.loadPages(list.getSelectedValue().id);
+            currentBoardId = list.getSelectedValue().id;
+            ArrayList<CanvasPanel.Page> pages = WhiteboardDB.loadPages(currentBoardId);
             canvas.loadPages(pages);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(parent, "Load failed:\n" + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
@@ -716,6 +721,7 @@ public class whiteboardGUI {
                 "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             if (confirm != JOptionPane.YES_OPTION) return;
             WhiteboardDB.delete(sel.id);
+            if (sel.id == currentBoardId) currentBoardId = -1;
             JOptionPane.showMessageDialog(parent, "\"" + sel.name + "\" deleted.", "Deleted", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(parent, "Delete failed:\n" + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
@@ -728,7 +734,7 @@ public class whiteboardGUI {
             "Save Snapshot", JOptionPane.PLAIN_MESSAGE);
         if (label == null || label.isBlank()) return;
         try {
-            WhiteboardDB.saveSnapshot(currentUserId, label.trim(), canvas.getPages());
+            WhiteboardDB.saveSnapshot(currentUserId, currentBoardId, label.trim(), canvas.getPages());
             JOptionPane.showMessageDialog(parent, "Snapshot \"" + label.trim() + "\" saved.",
                 "Snapshot Saved", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
@@ -738,7 +744,7 @@ public class whiteboardGUI {
 
     private void handleLoadSnapshot(CanvasPanel canvas, JFrame parent) {
         try {
-            List<WhiteboardDB.Snapshot> snaps = WhiteboardDB.listSnapshots(currentUserId);
+            List<WhiteboardDB.Snapshot> snaps = WhiteboardDB.listSnapshots(currentUserId, currentBoardId);
             if (snaps.isEmpty()) {
                 JOptionPane.showMessageDialog(parent,
                     "No snapshots found. Use the Snapshot button to save one.",
@@ -830,8 +836,10 @@ public class whiteboardGUI {
 
         File file = chooser.getSelectedFile();
         String fname = file.getName().toLowerCase();
-        boolean isPDF  = fname.endsWith(".pdf");
-        boolean isJPEG = fname.endsWith(".jpg") || fname.endsWith(".jpeg");
+        String filterDesc = chooser.getFileFilter().getDescription();
+        boolean isPDF  = fname.endsWith(".pdf")  || (!fname.contains(".") && filterDesc.contains("PDF"));
+        boolean isJPEG = fname.endsWith(".jpg") || fname.endsWith(".jpeg")
+                      || (!fname.contains(".") && filterDesc.contains("JPEG"));
 
         try {
             if (pageIndices.length == 1) {

@@ -88,9 +88,10 @@ CREATE TABLE images (
 );
 
 CREATE TABLE snapshots (
-    id         SERIAL PRIMARY KEY,
-    user_id    INT          NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    label      VARCHAR(255),
-    data       TEXT         NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id            SERIAL PRIMARY KEY,
+    user_id       INT          NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    whiteboard_id INT          REFERENCES whiteboards(id) ON DELETE CASCADE,
+    label         VARCHAR(255),
+    data          TEXT         NOT NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

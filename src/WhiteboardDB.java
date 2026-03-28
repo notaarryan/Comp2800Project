@@ -296,22 +296,27 @@ public class WhiteboardDB {
         }
     }
 
-    static void saveSnapshot(int userId, String label, ArrayList<CanvasPanel.Page> pages) throws SQLException {
+    static void saveSnapshot(int userId, int boardId, String label, ArrayList<CanvasPanel.Page> pages) throws SQLException {
         String data = serializePages(pages);
         try (Connection conn = connect();
              PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO snapshots (user_id, label, data) VALUES (?,?,?)")) {
-            ps.setInt(1, userId); ps.setString(2, label); ps.setString(3, data);
+                "INSERT INTO snapshots (user_id, whiteboard_id, label, data) VALUES (?,?,?,?)")) {
+            ps.setInt(1, userId);
+            if (boardId > 0) ps.setInt(2, boardId); else ps.setNull(2, java.sql.Types.INTEGER);
+            ps.setString(3, label); ps.setString(4, data);
             ps.executeUpdate();
         }
     }
 
-    static List<Snapshot> listSnapshots(int userId) throws SQLException {
+    static List<Snapshot> listSnapshots(int userId, int boardId) throws SQLException {
         List<Snapshot> list = new ArrayList<>();
+        String sql = boardId > 0
+            ? "SELECT id,label,created_at FROM snapshots WHERE user_id=? AND whiteboard_id=? ORDER BY created_at DESC"
+            : "SELECT id,label,created_at FROM snapshots WHERE user_id=? AND whiteboard_id IS NULL ORDER BY created_at DESC";
         try (Connection conn = connect();
-             PreparedStatement ps = conn.prepareStatement(
-                "SELECT id,label,created_at FROM snapshots WHERE user_id=? ORDER BY created_at DESC")) {
+             PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, userId);
+            if (boardId > 0) ps.setInt(2, boardId);
             ResultSet rs = ps.executeQuery();
             while (rs.next())
                 list.add(new Snapshot(rs.getInt("id"), rs.getString("label"),

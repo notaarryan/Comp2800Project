@@ -72,7 +72,7 @@ public class WhiteboardClient {
         if (message.isEmpty() || listener == null) return;
         String[] parts = message.split(" ");
         String cmd = parts[0].toUpperCase();
-
+        try {
         switch (cmd) {
             case "DRAW" -> {
                 if (parts.length >= 7)
@@ -138,6 +138,9 @@ public class WhiteboardClient {
                     listener.onChat(user, msg);
                 }
             }
+        }
+        } catch (NumberFormatException e) {
+            System.err.println("[Client] Malformed message ignored: " + message);
         }
     }
 

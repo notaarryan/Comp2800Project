@@ -107,6 +107,7 @@ class CanvasPanel extends JPanel {
         setupZoomPan();
         setupPaste();
         setupSpacePan();
+        setupDeleteKey();
     }
 
     private void setupMouseListeners() {
@@ -279,6 +280,29 @@ class CanvasPanel extends JPanel {
         vpY = cy - (cy - vpY) * (vpScale / oldScale);
         repositionTextOverlay();
         repaint();
+    }
+
+    private void setupDeleteKey() {
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+            .put(KeyStroke.getKeyStroke("DELETE"), "deleteSelected");
+        getActionMap().put("deleteSelected", new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                java.awt.Component focused = java.awt.KeyboardFocusManager
+                    .getCurrentKeyboardFocusManager().getFocusOwner();
+                if (focused instanceof javax.swing.text.JTextComponent) return;
+                if (selectedItems.isEmpty()) return;
+                for (Object obj : selectedItems) {
+                    pg().drawOrder.remove(obj);
+                    if      (obj instanceof Stroke)     pg().strokes.remove(obj);
+                    else if (obj instanceof ShapeItem)  pg().shapes.remove(obj);
+                    else if (obj instanceof TextItem)   pg().texts.remove(obj);
+                    else if (obj instanceof StickyNote) pg().stickies.remove(obj);
+                    else if (obj instanceof ImageItem)  pg().images.remove(obj);
+                }
+                selectedItems.clear();
+                repaint();
+            }
+        });
     }
 
     private void setupSpacePan() {
@@ -454,9 +478,15 @@ class CanvasPanel extends JPanel {
                 Stroke stroke = (Stroke) obj;
                 g2.setColor(stroke.color);
                 g2.setStroke(new BasicStroke(stroke.width, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                for (int i = 1; i < stroke.points.size(); i++) {
-                    Point p1 = stroke.points.get(i - 1), p2 = stroke.points.get(i);
-                    g2.drawLine(p1.x, p1.y, p2.x, p2.y);
+                if (stroke.points.size() == 1) {
+                    int r = Math.max(1, (int)(stroke.width / 2));
+                    Point p = stroke.points.get(0);
+                    g2.fillOval(p.x - r, p.y - r, r * 2, r * 2);
+                } else {
+                    for (int i = 1; i < stroke.points.size(); i++) {
+                        Point p1 = stroke.points.get(i - 1), p2 = stroke.points.get(i);
+                        g2.drawLine(p1.x, p1.y, p2.x, p2.y);
+                    }
                 }
             } else if (obj instanceof ShapeItem) {
                 ShapeItem s = (ShapeItem) obj;
@@ -663,7 +693,7 @@ class CanvasPanel extends JPanel {
     }
 
     private Rectangle selectionBounds() {
-        int x1 = Integer.MAX_VALUE, y1 = Integer.MAX_VALUE, x2 = 0, y2 = 0;
+        int x1 = Integer.MAX_VALUE, y1 = Integer.MAX_VALUE, x2 = Integer.MIN_VALUE, y2 = Integer.MIN_VALUE;
         for (Object obj : selectedItems) {
             Rectangle r = getBoundsOf(obj);
             if (r == null) continue;
@@ -683,8 +713,9 @@ class CanvasPanel extends JPanel {
         else if (obj instanceof ImageItem)  { ImageItem ii = (ImageItem)obj;
             return new Rectangle(ii.pos.x, ii.pos.y, ii.width, ii.height); }
         else if (obj instanceof Stroke)     { Stroke st = (Stroke)obj;
-            int x1=Integer.MAX_VALUE, y1=Integer.MAX_VALUE, x2=0, y2=0;
+            int x1=Integer.MAX_VALUE, y1=Integer.MAX_VALUE, x2=Integer.MIN_VALUE, y2=Integer.MIN_VALUE;
             for (Point p : st.points) { x1=Math.min(x1,p.x); y1=Math.min(y1,p.y); x2=Math.max(x2,p.x); y2=Math.max(y2,p.y); }
+            if (x2 == Integer.MIN_VALUE) return null;
             return new Rectangle(x1, y1, x2-x1, y2-y1); }
         return null;
     }
@@ -799,11 +830,14 @@ class CanvasPanel extends JPanel {
     public ArrayList<Page>       getPages()    { return pages; }
 
     public void loadPages(ArrayList<Page> loaded) {
+        commitTextOverlay();
         pages.clear();
         pages.addAll(loaded);
         if (pages.isEmpty()) pages.add(new Page("Page 1"));
         currentPageIdx = 0;
         selectedItems.clear();
+        marquee = null;
+        vpX = 0; vpY = 0; vpScale = 1.0;
         if (onPagesChanged != null) onPagesChanged.run();
         repaint();
     }
@@ -825,9 +859,15 @@ class CanvasPanel extends JPanel {
                 Stroke stroke = (Stroke) obj;
                 g2.setColor(stroke.color);
                 g2.setStroke(new BasicStroke(stroke.width, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                for (int i = 1; i < stroke.points.size(); i++) {
-                    Point p1 = stroke.points.get(i - 1), p2 = stroke.points.get(i);
-                    g2.drawLine(p1.x, p1.y, p2.x, p2.y);
+                if (stroke.points.size() == 1) {
+                    int r = Math.max(1, (int)(stroke.width / 2));
+                    Point p = stroke.points.get(0);
+                    g2.fillOval(p.x - r, p.y - r, r * 2, r * 2);
+                } else {
+                    for (int i = 1; i < stroke.points.size(); i++) {
+                        Point p1 = stroke.points.get(i - 1), p2 = stroke.points.get(i);
+                        g2.drawLine(p1.x, p1.y, p2.x, p2.y);
+                    }
                 }
             } else if (obj instanceof ShapeItem) {
                 ShapeItem s = (ShapeItem) obj;
